@@ -18,6 +18,8 @@ deepseek:
   timeout: 60
   # 批量翻译时每次请求的段落数上限
   batch_size: 16
+  # 默认翻译目标语言（命令行 --target-lang 可覆盖）
+  target_lang: "英文"
 
 pipeline:
   # 默认输入输出路径；留空时必须在命令行通过 --input / --output 指定。
@@ -27,6 +29,10 @@ pipeline:
   output_path: "D:/project/python_release/avation_doc/output"
   # 扫描输入文件夹时是否递归子目录（仅在 input_path 为目录时生效）
   recursive: false
+  # 是否启用 DeepSeek 翻译（命令行 --translate 可覆盖）
+  translate: false
+  # 是否保存翻译后的 Markdown（命令行 --save-markdown 可覆盖）
+  save_markdown: false
 
 logging:
   level: "INFO"

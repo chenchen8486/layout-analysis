@@ -132,6 +132,34 @@ def collect_pdfs(input_path: Path, recursive: bool = False) -> List[Path]:
     raise ValueError(f"输入路径必须是 PDF 文件或目录: {input_path}")
 
 
+def _build_markdown_lines(
+    elements: List[Any],
+    translated_map: Optional[Dict[int, str]] = None,
+) -> List[str]:
+    """根据版面元素列表生成 Markdown 行。
+
+    Args:
+        elements: LayoutElement 列表。
+        translated_map: 索引到译文的映射；None 则使用原文。
+
+    Returns:
+        Markdown 字符串行列表。
+    """
+    md_lines: List[str] = []
+    for idx, elem in enumerate(elements):
+        text = translated_map.get(idx, elem.text) if translated_map else elem.text
+        if not text:
+            text = elem.text
+
+        if elem.element_type.value == "title":
+            md_lines.append(f"# {text}\n")
+        elif elem.element_type.value in ("header", "footer", "page_number"):
+            md_lines.append(f"*{text}*\n")
+        else:
+            md_lines.append(f"{text}\n")
+    return md_lines
+
+
 def get_pdf_meta_dir(pdf_path: Path, output_path: Path) -> Path:
     """计算单个 PDF 对应的元数据子目录。
 
@@ -199,6 +227,7 @@ def process_single_pdf(
                 return False, err
 
     # ---- 阶段 2: 版面分析 ----
+    layout_parser: Optional[LayoutParser] = None
     if tracker.is_stage_needed(pdf_path, "layout"):
         try:
             layout_parser = LayoutParser(auto_dir)
@@ -213,13 +242,29 @@ def process_single_pdf(
             logger.error(f"[{pdf_path.name}] 版面分析失败: {exc}", exc_info=True)
             tracker.mark_stage(pdf_path, "layout", StageStatus.FAILED, error=str(exc))
             return False, str(exc)
+    else:
+        # 增量跳过：仍需解析以用于后续 Markdown 生成
+        try:
+            layout_parser = LayoutParser(auto_dir)
+            layout_parser.parse()
+        except Exception:
+            layout_parser = None
+
+    # 无论是否翻译，都先保存原始 Markdown
+    if layout_parser is not None:
+        original_md_path = pdf_meta_dir / "original.md"
+        original_lines = _build_markdown_lines(layout_parser.elements)
+        with open(original_md_path, "w", encoding="utf-8-sig") as f:
+            f.write("\n".join(original_lines))
+        logger.info(f"[{pdf_path.name}] 原始 Markdown 已保存: {original_md_path}")
 
     # ---- 阶段 3: DeepSeek 翻译（可选） ----
     if translator is not None:
         if tracker.is_stage_needed(pdf_path, "translate"):
             try:
-                layout_parser = LayoutParser(auto_dir)
-                layout_parser.parse()
+                if layout_parser is None:
+                    layout_parser = LayoutParser(auto_dir)
+                    layout_parser.parse()
                 translatable = layout_parser.get_translatable_elements()
                 if not translatable:
                     logger.warning(f"[{pdf_path.name}] 未找到可翻译文本，跳过翻译")
@@ -236,20 +281,12 @@ def process_single_pdf(
                     logger.info(f"[{pdf_path.name}] 翻译完成: {success_count}/{len(results)} 成功")
 
                     if save_markdown:
-                        md_lines: List[str] = []
-                        for idx, elem in enumerate(translatable):
-                            if idx < len(results) and results[idx].success:
-                                translated_text = results[idx].translated
-                            else:
-                                translated_text = elem.text
-
-                            if elem.element_type.value == "title":
-                                md_lines.append(f"# {translated_text}\n")
-                            elif elem.element_type.value in ("header", "footer", "page_number"):
-                                md_lines.append(f"*{translated_text}*\n")
-                            else:
-                                md_lines.append(f"{translated_text}\n")
-
+                        translated_map = {
+                            idx: results[idx].translated
+                            for idx in range(len(results))
+                            if idx < len(results) and results[idx].success
+                        }
+                        md_lines = _build_markdown_lines(translatable, translated_map)
                         md_path = pdf_meta_dir / "translated.md"
                         with open(md_path, "w", encoding="utf-8-sig") as f:
                             f.write("\n".join(md_lines))
@@ -317,8 +354,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-lang",
         type=str,
-        default="英文",
-        help="翻译目标语言（默认 英文）",
+        default=None,
+        help="翻译目标语言（默认 英文，也可通过配置文件 deepseek.target_lang 设置）",
     )
     parser.add_argument(
         "--save-markdown", "-m",
@@ -409,6 +446,11 @@ def main() -> int:
     language = args.language or mineru_cfg.get("language", "ch")
     recursive = args.recursive or pipeline_cfg.get("recursive", False)
 
+    # 翻译开关与目标语言同样支持配置文件
+    translate = args.translate or pipeline_cfg.get("translate", False)
+    target_lang = args.target_lang or deepseek_cfg.get("target_lang", "英文")
+    save_markdown = args.save_markdown or pipeline_cfg.get("save_markdown", False)
+
     # 若环境变量存在 DEEPSEEK_API_KEY，也纳入备选
     deepseek_api_key = (
         deepseek_cfg.get("api_key")
@@ -433,9 +475,9 @@ def main() -> int:
     logger.info(f"PDF 数量 : {len(pdf_files)}")
     logger.info(f"后端模式 : {backend}")
     logger.info(f"文档语言 : {language}")
-    logger.info(f"启用翻译 : {args.translate}")
-    if args.translate:
-        logger.info(f"目标语言 : {args.target_lang}")
+    logger.info(f"启用翻译 : {translate}")
+    if translate:
+        logger.info(f"目标语言 : {target_lang}")
     logger.info("=" * 50)
 
     # ---- 初始化共享引擎与翻译器 ----
@@ -450,7 +492,7 @@ def main() -> int:
         return 1
 
     translator: Optional[DeepSeekTranslator] = None
-    if args.translate:
+    if translate:
         if not deepseek_api_key:
             logger.error(
                 "启用翻译但未找到 DeepSeek API Key。"
@@ -483,12 +525,12 @@ def main() -> int:
             output_path=args.output,
             engine=engine,
             translator=translator,
-            target_lang=args.target_lang,
-            save_markdown=args.save_markdown,
+            target_lang=target_lang,
+            save_markdown=save_markdown,
         )
 
         tracker = PipelineTracker(get_pdf_meta_dir(pdf_path, args.output))
-        all_done = tracker.all_done(["mineru", "layout"] + (["translate"] if args.translate else []))
+        all_done = tracker.all_done(["mineru", "layout"] + (["translate"] if translate else []))
 
         if success and all_done:
             # 进一步判断是否真正执行了（而非全部跳过）

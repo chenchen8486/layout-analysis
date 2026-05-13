@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      {"tool": "Read", "param": "file_path", "regex": ".*"},
+      {"tool": "Glob", "regex": ".*"},
+      {"tool": "Grep", "regex": ".*"},
+      {"tool": "Bash", "param": "command", "regex": "^(ls|find|grep|cat|head|tail|pwd|echo|git status|git log|git diff|git branch|conda env list|pip list|pytest|python -m unittest)"}
+    ]
+  }
+}

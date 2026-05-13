@@ -64,15 +64,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--input", "-i",
-        required=True,
         type=Path,
-        help="待解析的 PDF 文件路径",
+        default=None,
+        help="待解析的 PDF 文件路径；未指定时使用配置文件中的 pipeline.input_path",
     )
     parser.add_argument(
         "--output", "-o",
-        required=True,
         type=Path,
-        help="解析结果输出目录",
+        default=None,
+        help="解析结果输出目录；未指定时使用配置文件中的 pipeline.output_path",
     )
     parser.add_argument(
         "--config", "-c",
@@ -122,9 +122,52 @@ def main() -> int:
 
     # 加载配置
     config = load_config(args.config)
+    pipeline_cfg = config.get("pipeline", {})
     mineru_cfg = config.get("mineru", {})
     deepseek_cfg = config.get("deepseek", {})
     log_cfg = config.get("logging", {})
+
+    # 项目根目录，用于将配置文件中的相对路径解析为绝对路径
+    project_root = Path(__file__).resolve().parent
+
+    # ---- 输入 / 输出路径回退（命令行 > 配置文件） ----
+    input_path: Optional[Path] = args.input
+    if input_path is None:
+        cfg_input = pipeline_cfg.get("input_path", "")
+        if cfg_input:
+            input_path = Path(cfg_input)
+
+    if input_path is None or str(input_path) == "." or str(input_path) == "":
+        logger.error(
+            "未指定输入 PDF 路径。请通过以下方式之一设置：\n"
+            "1. 命令行参数: --input / -i\n"
+            "2. 配置文件: config/settings.yaml 的 pipeline.input_path"
+        )
+        return 1
+
+    if not input_path.is_absolute():
+        input_path = project_root / input_path
+
+    output_path: Optional[Path] = args.output
+    if output_path is None:
+        cfg_output = pipeline_cfg.get("output_path", "")
+        if cfg_output:
+            output_path = Path(cfg_output)
+
+    if output_path is None or str(output_path) == "." or str(output_path) == "":
+        logger.error(
+            "未指定输出目录。请通过以下方式之一设置：\n"
+            "1. 命令行参数: --output / -o\n"
+            "2. 配置文件: config/settings.yaml 的 pipeline.output_path"
+        )
+        return 1
+
+    if not output_path.is_absolute():
+        output_path = project_root / output_path
+
+    # 回写到 args，保证后续代码统一通过 args 访问
+    args.input = input_path
+    args.output = output_path
 
     # 重新初始化日志级别（若配置文件中指定）
     if log_cfg.get("level"):

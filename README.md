@@ -41,6 +41,12 @@ deepseek:
   max_retries: 3
   timeout: 60
   batch_size: 16
+
+pipeline:
+  # 默认输入输出路径；支持相对路径（基于项目根目录）或绝对路径
+  # 配置后可直接在 IDE 中右键运行 main.py，无需命令行参数
+  input_path: "./data/test.pdf"
+  output_path: "./outputs/test"
 ```
 
 或通过环境变量设置：
@@ -52,21 +58,28 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ## 快速启动
 
-### 仅解析 PDF（生成 Markdown、JSON、图片）
+### 方式一：IDE 直接运行（推荐日常开发）
+
+在 `config/settings.yaml` 的 `pipeline` 段配置好路径后，直接在 PyCharm / VS Code 中右键运行 `main.py`，无需输入任何命令行参数。
+
+```yaml
+pipeline:
+  input_path: "./data/test.pdf"      # 相对路径基于项目根目录
+  output_path: "./outputs/test"
+```
+
+### 方式二：命令行运行（适合脚本化、批处理）
+
+命令行参数的优先级高于配置文件，可临时覆盖配置。
 
 ```bash
+# 仅解析 PDF
 python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test"
-```
 
-### 解析 + 翻译为英文
-
-```bash
+# 解析 + 翻译为英文
 python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" --translate --target-lang 英文
-```
 
-### 解析 + 翻译 + 生成翻译后 Markdown
-
-```bash
+# 解析 + 翻译 + 生成翻译后 Markdown
 python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" -t --target-lang 英文 -m
 ```
 

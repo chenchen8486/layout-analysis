@@ -100,11 +100,12 @@ python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" -t --target-lang 英�
 outputs/
 ├── {pdf_stem_A}/
 │   ├── pipeline_state.json          # 各阶段完成状态与源文件 mtime
-│   ├── auto/                        # MinerU 原始输出
-│   │   └── {stem}_content_list.json
-│   ├── layout_summary.json          # 版面分析摘要
-│   ├── translated_content.json      # 翻译结果（可选）
-│   └── translated.md                # 翻译后 Markdown（可选）
+│   ├── auto/                        # MinerU 原始输出 + 翻译结果
+│   │   ├── {stem}_content_list.json # 版面元素列表
+│   │   ├── {stem}.md                # 原始 Markdown（MinerU 生成）
+│   │   ├── {stem}_zh.md             # 中文翻译 Markdown（保持原格式、图片引用不变）
+│   │   └── images/                  # 提取的图片
+│   └── layout_summary.json          # 版面分析摘要
 ├── {pdf_stem_B}/
 │   └── ...
 └── batch_summary.json               # 本次批量运行总览（成功/跳过/失败统计）
@@ -157,8 +158,8 @@ main.py
   ├── core/layout_parser.py  ← 读取 content_list.json，提取版面元素
   │       └── layout_summary.json
   │
-  ├── core/translator.py     ←（可选）DeepSeek 批量翻译
-  │       └── translated_content.json、translated.md
+  ├── core/translator.py     ←（可选）DeepSeek Markdown 全文翻译
+  │       └── auto/{stem}_zh.md（保持原格式、图片引用不变）
   │
   └── batch_summary.json     ← 批量运行总览
 ```
@@ -196,3 +197,4 @@ python -m unittest tests.test_pipeline_tracker -v
 - **2026-05-13**: 初始化工程结构，完成全部模块开发。
 - **2026-05-13**: 支持 YAML 配置中 `r"..."` 原始字符串与 Windows 反斜杠路径。
 - **2026-05-13**: 新增批量转换与增量转换能力，引入 `PipelineTracker` 状态追踪模块，支持文件夹输入、断点续传与批量汇总报告。
+- **2026-05-13**: 翻译策略改为直接对 MinerU 生成的 Markdown 全文翻译，保持原有格式、图片引用、表格结构不变，译文输出到 `auto/{stem}_zh.md`，与原文并排存放。

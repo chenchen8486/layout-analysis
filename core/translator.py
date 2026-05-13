@@ -97,12 +97,18 @@ class DeepSeekTranslator:
             f"DeepSeek API 请求失败，已重试 {self.max_retries} 次: {last_exception}"
         ) from last_exception
 
-    def translate_single(self, text: str, target_lang: str = "英文") -> TranslationResult:
-        """翻译单段文本。
+    def translate_text(
+        self,
+        text: str,
+        target_lang: str = "英文",
+        system_prompt: Optional[str] = None,
+    ) -> TranslationResult:
+        """翻译任意文本，支持自定义 system prompt。
 
         Args:
             text: 待翻译文本。
             target_lang: 目标语言描述，如 "英文", "Japanese"。
+            system_prompt: 自定义系统提示；None 则使用默认翻译提示。
 
         Returns:
             翻译结果对象。
@@ -110,12 +116,13 @@ class DeepSeekTranslator:
         if not text or not text.strip():
             return TranslationResult(original=text, translated="", index=0, success=True)
 
-        system_prompt = (
-            f"You are a professional translator. "
-            f"Translate the following text into {target_lang}. "
-            f"Preserve the original format (markdown, html tags, line breaks) as much as possible. "
-            f"Only return the translated text without explanations."
-        )
+        if system_prompt is None:
+            system_prompt = (
+                f"You are a professional translator. "
+                f"Translate the following text into {target_lang}. "
+                f"Preserve the original format (markdown, html tags, line breaks) as much as possible. "
+                f"Only return the translated text without explanations."
+            )
 
         payload = {
             "model": self.model,
@@ -135,6 +142,10 @@ class DeepSeekTranslator:
             return TranslationResult(
                 original=text, translated="", index=0, success=False, error=str(exc)
             )
+
+    def translate_single(self, text: str, target_lang: str = "英文") -> TranslationResult:
+        """翻译单段文本（快捷方式，使用默认提示词）。"""
+        return self.translate_text(text, target_lang=target_lang)
 
     def translate_batch(
         self,

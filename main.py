@@ -161,6 +161,23 @@ def _build_markdown_lines(
     return md_lines
 
 
+def _lang_to_suffix(lang: str) -> str:
+    """将目标语言描述映射为文件名后缀。"""
+    mapping = {
+        "中文": "zh",
+        "英文": "en",
+        "日文": "ja",
+        "日语": "ja",
+        "韩文": "ko",
+        "韩语": "ko",
+        "法文": "fr",
+        "法语": "fr",
+        "德文": "de",
+        "德语": "de",
+    }
+    return mapping.get(lang, "translated")
+
+
 def get_pdf_meta_dir(pdf_path: Path, output_path: Path) -> Path:
     """计算单个 PDF 对应的元数据子目录。
 
@@ -251,49 +268,59 @@ def process_single_pdf(
         except Exception:
             layout_parser = None
 
-    # 无论是否翻译，都先保存原始 Markdown
-    if layout_parser is not None:
-        original_md_path = pdf_meta_dir / "original.md"
-        original_lines = _build_markdown_lines(layout_parser.elements)
-        with open(original_md_path, "w", encoding="utf-8-sig") as f:
-            f.write("\n".join(original_lines))
-        logger.info(f"[{pdf_path.name}] 原始 Markdown 已保存: {original_md_path}")
-
     # ---- 阶段 3: DeepSeek 翻译（可选） ----
     if translator is not None:
         if tracker.is_stage_needed(pdf_path, "translate"):
             try:
-                if layout_parser is None:
-                    layout_parser = LayoutParser(auto_dir)
-                    layout_parser.parse()
-                translatable = layout_parser.get_translatable_elements()
-                if not translatable:
-                    logger.warning(f"[{pdf_path.name}] 未找到可翻译文本，跳过翻译")
+                # 查找 MinerU 生成的原始 Markdown 文件
+                md_candidates = list(auto_dir.glob("*.md"))
+                md_path = auto_dir / f"{pdf_path.stem}.md"
+                if not md_path.exists() and md_candidates:
+                    md_path = md_candidates[0]
+
+                if not md_path.exists():
+                    logger.warning(f"[{pdf_path.name}] 未找到原始 Markdown 文件，跳过翻译")
                     tracker.mark_stage(pdf_path, "translate", StageStatus.SKIPPED)
                 else:
-                    texts = [e.text for e in translatable]
-                    logger.info(f"[{pdf_path.name}] 待翻译文本段数: {len(texts)}")
+                    with open(md_path, "r", encoding="utf-8-sig") as f:
+                        md_content = f.read()
 
-                    results = translator.translate_batch(texts, target_lang=target_lang)
-                    translated_path = pdf_meta_dir / "translated_content.json"
-                    translator.save_results(results, translated_path)
+                    if not md_content.strip():
+                        logger.warning(f"[{pdf_path.name}] Markdown 文件为空，跳过翻译")
+                        tracker.mark_stage(pdf_path, "translate", StageStatus.SKIPPED)
+                    else:
+                        logger.info(f"[{pdf_path.name}] Markdown 全文翻译，原文长度: {len(md_content)} 字符")
 
-                    success_count = sum(1 for r in results if r.success)
-                    logger.info(f"[{pdf_path.name}] 翻译完成: {success_count}/{len(results)} 成功")
+                        system_prompt = (
+                            f"You are a professional translator. "
+                            f"Translate the following Markdown document into {target_lang}. "
+                            f"CRITICAL REQUIREMENTS:\n"
+                            f"1. Preserve ALL Markdown syntax exactly (headings, lists, tables, code blocks, etc.)\n"
+                            f"2. Do NOT modify any image references like ![alt](path) or image paths\n"
+                            f"3. Do NOT modify any URL links like [text](url)\n"
+                            f"4. Do NOT modify any HTML tags\n"
+                            f"5. Only translate natural language text content\n"
+                            f"6. Return the complete translated Markdown document, keeping the same structure"
+                        )
 
-                    if save_markdown:
-                        translated_map = {
-                            idx: results[idx].translated
-                            for idx in range(len(results))
-                            if idx < len(results) and results[idx].success
-                        }
-                        md_lines = _build_markdown_lines(translatable, translated_map)
-                        md_path = pdf_meta_dir / "translated.md"
-                        with open(md_path, "w", encoding="utf-8-sig") as f:
-                            f.write("\n".join(md_lines))
-                        logger.info(f"[{pdf_path.name}] 翻译 Markdown 已保存: {md_path}")
+                        result = translator.translate_text(
+                            md_content,
+                            target_lang=target_lang,
+                            system_prompt=system_prompt,
+                        )
 
-                    tracker.mark_stage(pdf_path, "translate", StageStatus.DONE)
+                        if not result.success:
+                            raise RuntimeError(f"Markdown 翻译失败: {result.error}")
+
+                        # 保存到 auto 目录，和原文并排
+                        if save_markdown:
+                            suffix = _lang_to_suffix(target_lang)
+                            translated_md_path = md_path.parent / f"{pdf_path.stem}_{suffix}.md"
+                            with open(translated_md_path, "w", encoding="utf-8-sig") as f:
+                                f.write(result.translated)
+                            logger.info(f"[{pdf_path.name}] 翻译 Markdown 已保存: {translated_md_path}")
+
+                        tracker.mark_stage(pdf_path, "translate", StageStatus.DONE)
             except Exception as exc:
                 logger.error(f"[{pdf_path.name}] 翻译失败: {exc}", exc_info=True)
                 tracker.mark_stage(pdf_path, "translate", StageStatus.FAILED, error=str(exc))

@@ -14,6 +14,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -28,6 +29,18 @@ from utils.logger import setup_logger
 logger = setup_logger("main")
 
 
+def _preprocess_yaml_raw(text: str) -> str:
+    """预处理 YAML 文本，支持 r'...' / r\"...\" 原始字符串语法。
+
+    将 r\"...\" 替换为 '...'（单引号），避免 YAML 双引号中的反斜杠转义问题。
+    """
+    # r"..." -> '...'
+    text = re.sub(r'r"([^"]*)"', r"'\1'", text)
+    # r'...' -> '...'
+    text = re.sub(r"r'([^']*)'", r"'\1'", text)
+    return text
+
+
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """加载 YAML 配置文件。
 
@@ -36,6 +49,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     Returns:
         配置字典。
+
+    Raises:
+        RuntimeError: YAML 格式非法或包含不可打印转义字符时抛出，并给出修复提示。
     """
     if config_path is None:
         config_path = Path(__file__).resolve().parent / "config" / "settings.yaml"
@@ -47,7 +63,39 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         return {}
 
     with open(config_path, "r", encoding="utf-8-sig") as f:
-        return yaml.safe_load(f) or {}
+        raw_text = f.read()
+
+    # 支持 r"..." / r'...' 原始字符串
+    raw_text = _preprocess_yaml_raw(raw_text)
+
+    try:
+        config = yaml.safe_load(raw_text) or {}
+    except yaml.reader.ReaderError as exc:
+        err_msg = (
+            f"配置文件解析失败，检测到不可打印字符（通常是 Windows 路径中的反斜杠被当作转义符）。\n"
+            f"错误位置: 第 {exc.position + 1} 个字符附近\n"
+            f"修复方案（任选其一）：\n"
+            f"1. 路径前加 r 前缀:  input_path: r\"D:\\\\project\\\\...\"\n"
+            f"2. 改用单引号:      input_path: 'D:\\\\project\\\\...'\n"
+            f"3. 去掉引号:        input_path: D:\\\\project\\\\...\n"
+            f"4. 反斜杠改斜杠:    input_path: D:/project/..."
+        )
+        logger.error(err_msg)
+        raise RuntimeError(err_msg) from exc
+
+    # 对已知路径字段统一将反斜杠转为正斜杠，兼容 Windows 路径复制习惯
+    path_keys = [
+        ("pipeline", "input_path"),
+        ("pipeline", "output_path"),
+        ("mineru", "executable_path"),
+    ]
+    for section, key in path_keys:
+        if section in config and isinstance(config[section], dict):
+            val = config[section].get(key)
+            if isinstance(val, str):
+                config[section][key] = val.replace("\\", "/")
+
+    return config
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -120,6 +168,9 @@ def main() -> int:
     parser = build_argument_parser()
     args = parser.parse_args()
 
+    # 若后续需要重新初始化日志级别，提前声明 global
+    global logger
+
     # 加载配置
     config = load_config(args.config)
     pipeline_cfg = config.get("pipeline", {})
@@ -171,7 +222,6 @@ def main() -> int:
 
     # 重新初始化日志级别（若配置文件中指定）
     if log_cfg.get("level"):
-        global logger
         logger = setup_logger("main", level=log_cfg["level"], output_dir=log_cfg.get("output_dir", "logs"))
 
     # 环境变量兼容：自动设置 HF 国内镜像（与原始脚本保持一致）

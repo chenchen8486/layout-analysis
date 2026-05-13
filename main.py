@@ -537,7 +537,9 @@ def main() -> int:
             base_url=deepseek_cfg.get("base_url", "https://api.deepseek.com"),
             max_retries=deepseek_cfg.get("max_retries", 3),
             timeout=deepseek_cfg.get("timeout", 60),
-            batch_size=deepseek_cfg.get("batch_size", 16),
+            batch_size=deepseek_cfg.get("batch_size", 32),
+            temperature=deepseek_cfg.get("temperature", 0.1),
+            max_workers=deepseek_cfg.get("max_workers", 3),
         )
 
     # ---- 批量处理 ----

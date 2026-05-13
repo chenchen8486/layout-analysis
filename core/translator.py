@@ -2,6 +2,7 @@
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,7 +35,9 @@ class DeepSeekTranslator:
         base_url: str = "https://api.deepseek.com",
         max_retries: int = 3,
         timeout: int = 60,
-        batch_size: int = 16,
+        batch_size: int = 32,
+        temperature: float = 0.1,
+        max_workers: int = 3,
     ) -> None:
         """初始化翻译器。
 
@@ -44,7 +47,9 @@ class DeepSeekTranslator:
             base_url: API 基础地址。
             max_retries: 失败重试次数。
             timeout: 单次请求超时秒数。
-            batch_size: 批量翻译时每批段落数上限。
+            batch_size: 批量翻译时每批段落数上限（默认 32）。
+            temperature: 生成温度，越低越稳定（默认 0.1）。
+            max_workers: 并发线程数，控制同时发送的 batch 数量（默认 3）。
         """
         if not api_key:
             raise ValueError("DeepSeek API Key 不能为空，请在 config/settings.yaml 中配置")
@@ -55,6 +60,8 @@ class DeepSeekTranslator:
         self.max_retries = max_retries
         self.timeout = timeout
         self.batch_size = max(1, batch_size)
+        self.temperature = temperature
+        self.max_workers = max(1, max_workers)
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {self.api_key}",
@@ -130,7 +137,7 @@ class DeepSeekTranslator:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ],
-            "temperature": 0.3,
+            "temperature": self.temperature,
         }
 
         try:
@@ -152,7 +159,7 @@ class DeepSeekTranslator:
         texts: List[str],
         target_lang: str = "英文",
     ) -> List[TranslationResult]:
-        """批量翻译文本列表，内部按 batch_size 切片。
+        """批量翻译文本列表，内部按 batch_size 切片并并发执行。
 
         Args:
             texts: 待翻译文本列表。
@@ -161,17 +168,62 @@ class DeepSeekTranslator:
         Returns:
             与输入顺序对应的翻译结果列表。
         """
-        results: List[TranslationResult] = []
         total = len(texts)
-        logger.info(f"开始批量翻译，共 {total} 段文本，每批 {self.batch_size} 段")
+        logger.info(
+            f"开始批量翻译，共 {total} 段文本，每批 {self.batch_size} 段，"
+            f"并发 {self.max_workers} 个 batch，temperature={self.temperature}"
+        )
 
+        if total == 0:
+            return []
+
+        # 拆分为多个 batch
+        batches: List[tuple[int, List[str]]] = []
         for start in range(0, total, self.batch_size):
             batch = texts[start : start + self.batch_size]
-            batch_results = self._translate_batch_raw(batch, target_lang, start)
-            results.extend(batch_results)
-            logger.info(f"已完成 {min(start + self.batch_size, total)}/{total}")
+            batches.append((start, batch))
 
-        return results
+        # 并发执行
+        results: List[Optional[TranslationResult]] = [None] * total
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_start = {
+                executor.submit(self._translate_batch_raw, batch, target_lang, start): start
+                for start, batch in batches
+            }
+
+            for future in as_completed(future_to_start):
+                start = future_to_start[future]
+                try:
+                    batch_results = future.result()
+                    for idx, result in enumerate(batch_results):
+                        actual_idx = start + idx
+                        if actual_idx < len(results):
+                            results[actual_idx] = result
+                    logger.info(f"已完成 {min(start + self.batch_size, total)}/{total}")
+                except Exception as exc:
+                    logger.error(f"批次翻译失败（start={start}）: {exc}", exc_info=True)
+                    for i in range(start, min(start + self.batch_size, len(texts))):
+                        results[i] = TranslationResult(
+                            original=texts[i],
+                            translated="",
+                            index=i,
+                            success=False,
+                            error=str(exc),
+                        )
+
+        # 兜底：确保所有位置都有结果
+        for i in range(total):
+            if results[i] is None:
+                results[i] = TranslationResult(
+                    original=texts[i],
+                    translated="",
+                    index=i,
+                    success=False,
+                    error="未知错误",
+                )
+
+        return [r for r in results if r is not None]
 
     def _translate_batch_raw(
         self,
@@ -207,7 +259,7 @@ class DeepSeekTranslator:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": combined},
             ],
-            "temperature": 0.3,
+            "temperature": self.temperature,
         }
 
         try:

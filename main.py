@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+from dotenv import load_dotenv
 
 from core.layout_parser import LayoutParser
 from core.mineru_engine import MinerUEngine
@@ -376,6 +377,9 @@ def main() -> int:
     Returns:
         退出码，0 表示成功。
     """
+    # 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
+    load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+
     parser = build_argument_parser()
     args = parser.parse_args()
 

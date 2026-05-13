@@ -21,6 +21,9 @@ temp/
 .DS_Store
 Thumbs.db
 
+# Secrets & local env
+.env
+
 # Config overrides (keep template, ignore local secrets)
 config/settings.local.yaml
 

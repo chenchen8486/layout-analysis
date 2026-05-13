@@ -8,7 +8,7 @@
 - 支持单文件或整个文件夹的**批量转换**。
 - **增量转换**：自动跳过已处理且源文件未变更的 PDF，失败后支持断点续传。
 - 结构化解析版面元素（文本、标题、表格、图片等）。
-- 支持 DeepSeek API 段落级批量翻译。
+- 支持 DeepSeek API **全文 Markdown 翻译**，保持原有格式、图片引用、表格结构不变。
 - 全链路日志追踪与单元测试覆盖。
 
 ## 环境配置
@@ -27,32 +27,45 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 
 ### 3. 配置 MinerU 与 DeepSeek
 
-编辑 `config/settings.yaml`：
+#### 3.1 编辑 `config/settings.yaml`（常用配置）
 
 ```yaml
 mineru:
-  # 若 mineru.exe 已在 conda doc 环境或系统 PATH，可留空
+  # 若 mineru.exe 不在 conda doc 环境或系统 PATH，请填写绝对路径
   executable_path: ""
-  backend: "pipeline"
-  language: "ch"
 
 deepseek:
-  api_key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  model: "deepseek-chat"
-  base_url: "https://api.deepseek.com"
-  max_retries: 3
-  timeout: 60
-  batch_size: 16
+  # 推荐将 API Key 写入 .env 文件（DEEPSEEK_API_KEY=...），避免泄露
+  # 若此处留空，程序会自动读取 .env 或环境变量
+  api_key: ""
+  # 翻译目标语言：中文、英文、日文 等
+  target_lang: "中文"
 
 pipeline:
-  # input_path 可以是单个 PDF 文件，也可以是包含多个 PDF 的文件夹
-  input_path: "./data/"
-  output_path: "./outputs/"
-  # 扫描文件夹时是否递归子目录
-  recursive: false
+  # 输入路径：单个 PDF 文件，或包含多个 PDF 的文件夹
+  input_path: "D:/project/python_release/avation_doc/input"
+  # 输出路径：解析与翻译结果存放目录
+  output_path: "D:/project/python_release/avation_doc/output"
+  # 是否启用 DeepSeek 翻译（false = 仅解析，不翻译）
+  translate: true
+  # 是否保存翻译后的 Markdown 文件
+  save_markdown: true
+
+logging:
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  level: "INFO"
 ```
 
-或通过环境变量设置：
+#### 3.2 配置 `.env` 文件（推荐，安全存储 API Key）
+
+在项目根目录创建 `.env` 文件：
+
+```bash
+# DeepSeek API Key（此文件已加入 .gitignore，不会被提交）
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+#### 3.3 或通过环境变量设置
 
 ```bash
 set MINERU_PATH=C:\Users\chenc\anaconda3\envs\doc\Scripts\mineru.exe
@@ -69,6 +82,8 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 pipeline:
   input_path: "./data/"           # 文件夹路径 → 批量转换
   output_path: "./outputs/"
+  translate: true
+  save_markdown: true
 ```
 
 ### 方式二：命令行运行（适合脚本化、批处理）
@@ -85,11 +100,8 @@ python main.py -i "D:/docs/" -o "D:/outputs/"
 # 递归扫描子目录
 python main.py -i "D:/docs/" -o "D:/outputs/" -r
 
-# 解析 + 翻译为英文
-python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" --translate --target-lang 英文
-
-# 解析 + 翻译 + 生成翻译后 Markdown
-python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" -t --target-lang 英文 -m
+# 解析 + 翻译为中文
+python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" -t --target-lang 中文 -m
 ```
 
 ## 输出目录结构
@@ -117,7 +129,7 @@ outputs/
 layout_analysis/
 ├── config/
 │   ├── __init__.py
-│   └── settings.yaml          # 全局配置
+│   └── settings.yaml          # 全局配置（精简版，仅常用参数）
 ├── core/
 │   ├── __init__.py
 │   ├── mineru_engine.py       # MinerU CLI 封装
@@ -135,6 +147,7 @@ layout_analysis/
 ├── docs/
 │   ├── design.md              # 初始设计文档
 │   └── design_incremental_batch.md  # 增量批量转换设计
+├── .env                       # DeepSeek API Key（已加入 .gitignore）
 ├── main.py                    # 命令行入口
 ├── requirements.txt
 └── README.md
@@ -145,23 +158,27 @@ layout_analysis/
 ```text
 main.py
   │
-  ├── config/settings.yaml  ← 加载配置
+  ├── .env                    ← 加载环境变量（DEEPSEEK_API_KEY）
   │
-  ├── collect_pdfs()        ← 扫描输入路径（文件或文件夹）
+  ├── config/settings.yaml    ← 加载配置（translate、target_lang 等）
+  │
+  ├── collect_pdfs()          ← 扫描输入路径（文件或文件夹）
   │
   ├── core/pipeline_tracker.py  ← 检查每个 PDF 的各阶段状态
   │       └── pipeline_state.json
   │
-  ├── core/mineru_engine.py  ← 调用 mineru.exe 生成解析结果
+  ├── core/mineru_engine.py   ← 调用 mineru.exe 生成解析结果
   │       └── {stem}/auto/
+  │           └── {stem}.md（原始 Markdown）
   │
-  ├── core/layout_parser.py  ← 读取 content_list.json，提取版面元素
+  ├── core/layout_parser.py   ← 读取 content_list.json，提取版面元素
   │       └── layout_summary.json
   │
-  ├── core/translator.py     ←（可选）DeepSeek Markdown 全文翻译
-  │       └── auto/{stem}_zh.md（保持原格式、图片引用不变）
+  ├── core/translator.py      ←（可选）DeepSeek Markdown 全文翻译
+  │       └── 直接翻译 {stem}.md 全文，输出 {stem}_zh.md
+  │       └── 保持 Markdown 语法、图片引用、URL、HTML 标签不变
   │
-  └── batch_summary.json     ← 批量运行总览
+  └── batch_summary.json      ← 批量运行总览
 ```
 
 ## 增量转换机制
@@ -182,6 +199,37 @@ main.py
 - 修改了某个 PDF 后再次运行，仅重新处理该文件；
 - 某阶段失败后重跑，会从失败阶段继续，而非从头开始。
 
+### 如何强制重新翻译已完成的 PDF？
+
+由于翻译策略可能更新（如从段落重建改为全文 Markdown 翻译），需要重置翻译状态：
+
+```bash
+# 重置所有 PDF 的 translate 阶段状态
+python -c "
+import json, glob
+for path in glob.glob('outputs/*/pipeline_state.json'):
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        data = json.load(f)
+    data['stages']['translate']['status'] = 'pending'
+    data['stages']['translate']['timestamp'] = ''
+    with open(path, 'w', encoding='utf-8-sig') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f'已重置: {path}')
+"
+```
+
+## 翻译提效参数（代码内置默认值）
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `batch_size` | 32 | 每批翻译段落数，增大可减少请求次数 |
+| `temperature` | 0.1 | 生成温度，越低输出越稳定、确定性越高 |
+| `max_workers` | 3 | 并发线程数，同时发送 3 个 batch |
+| `max_retries` | 3 | 失败重试次数 |
+| `timeout` | 60 | 单次请求超时秒数 |
+
+如需调整，可在 `config/settings.yaml` 的 `deepseek` 段下添加对应项（如 `batch_size: 48`），代码会自动读取。不常用参数保持代码默认值即可。
+
 ## 测试
 
 ```bash
@@ -198,3 +246,6 @@ python -m unittest tests.test_pipeline_tracker -v
 - **2026-05-13**: 支持 YAML 配置中 `r"..."` 原始字符串与 Windows 反斜杠路径。
 - **2026-05-13**: 新增批量转换与增量转换能力，引入 `PipelineTracker` 状态追踪模块，支持文件夹输入、断点续传与批量汇总报告。
 - **2026-05-13**: 翻译策略改为直接对 MinerU 生成的 Markdown 全文翻译，保持原有格式、图片引用、表格结构不变，译文输出到 `auto/{stem}_zh.md`，与原文并排存放。
+- **2026-05-13**: 精简 `settings.yaml`，仅保留 7 个常用参数，其余使用代码内置默认值。
+- **2026-05-13**: 将 DeepSeek API Key 从 `settings.yaml` 迁移到 `.env` 文件，避免敏感凭证提交到 Git。
+- **2026-05-13**: 翻译提效优化：`batch_size` 16→32、`temperature` 0.3→0.1、`translate_batch` 改为 `ThreadPoolExecutor` 并发执行（max_workers=3）。

@@ -22,8 +22,11 @@ deepseek:
 pipeline:
   # 默认输入输出路径；留空时必须在命令行通过 --input / --output 指定。
   # 支持相对路径（相对于项目根目录）或绝对路径。
+  # input_path 可以是单个 PDF 文件，也可以是包含多个 PDF 的文件夹。
   input_path: ""
   output_path: ""
+  # 扫描输入文件夹时是否递归子目录（仅在 input_path 为目录时生效）
+  recursive: false
 
 logging:
   level: "INFO"

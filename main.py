@@ -1,8 +1,11 @@
 """MinerU 版面分析与翻译流水线入口。
 
 使用示例:
-    # 仅解析 PDF
+    # 仅解析单个 PDF
     python main.py --input test.pdf --output ./out
+
+    # 解析整个文件夹（批量 + 增量）
+    python main.py --input ./data/ --output ./outputs/
 
     # 解析 + 翻译为英文
     python main.py --input test.pdf --output ./out --translate --target-lang 英文
@@ -17,12 +20,13 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
 from core.layout_parser import LayoutParser
 from core.mineru_engine import MinerUEngine
+from core.pipeline_tracker import PipelineTracker, StageStatus
 from core.translator import DeepSeekTranslator
 from utils.logger import setup_logger
 
@@ -98,6 +102,171 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config
 
 
+def collect_pdfs(input_path: Path, recursive: bool = False) -> List[Path]:
+    """收集待处理的 PDF 文件列表。
+
+    Args:
+        input_path: 输入路径，可以是单个 PDF 文件或包含 PDF 的目录。
+        recursive: 若为 True，递归扫描子目录中的 PDF。
+
+    Returns:
+        按文件名排序的 PDF 路径列表。
+
+    Raises:
+        ValueError: 输入路径既不是 PDF 也不是目录。
+    """
+    input_path = Path(input_path)
+
+    if input_path.is_file() and input_path.suffix.lower() == ".pdf":
+        logger.info(f"单文件模式: {input_path}")
+        return [input_path]
+
+    if input_path.is_dir():
+        pattern = "**/*.pdf" if recursive else "*.pdf"
+        pdfs = sorted(input_path.glob(pattern))
+        logger.info(f"批量模式: 从 {input_path} 扫描到 {len(pdfs)} 个 PDF")
+        if not pdfs:
+            logger.warning(f"目录中未找到 PDF 文件: {input_path}")
+        return pdfs
+
+    raise ValueError(f"输入路径必须是 PDF 文件或目录: {input_path}")
+
+
+def get_pdf_meta_dir(pdf_path: Path, output_path: Path) -> Path:
+    """计算单个 PDF 对应的元数据子目录。
+
+    若 output_path 的目录名恰好与 PDF 主文件名一致（兼容旧单文件用法），
+    则直接复用该目录，避免嵌套。
+
+    Args:
+        pdf_path: PDF 文件路径。
+        output_path: 用户指定的总输出目录。
+
+    Returns:
+        该 PDF 专属的结果子目录。
+    """
+    if output_path.name == pdf_path.stem:
+        return output_path
+    return output_path / pdf_path.stem
+
+
+def process_single_pdf(
+    pdf_path: Path,
+    output_path: Path,
+    engine: MinerUEngine,
+    translator: Optional[DeepSeekTranslator],
+    target_lang: str,
+    save_markdown: bool,
+) -> Tuple[bool, str]:
+    """处理单个 PDF 的完整流水线（MinerU → 版面分析 → 翻译）。
+
+    Args:
+        pdf_path: PDF 文件路径。
+        output_path: 总输出目录。
+        engine: 已初始化的 MinerU 引擎。
+        translator: 已初始化的翻译器；None 表示不翻译。
+        target_lang: 目标语言。
+        save_markdown: 是否保存 Markdown。
+
+    Returns:
+        (是否成功, 错误信息)
+    """
+    pdf_meta_dir = get_pdf_meta_dir(pdf_path, output_path)
+    pdf_meta_dir.mkdir(parents=True, exist_ok=True)
+    tracker = PipelineTracker(pdf_meta_dir)
+
+    logger.info(f"开始处理: {pdf_path.name} -> {pdf_meta_dir}")
+
+    # ---- 阶段 1: MinerU 解析 ----
+    if tracker.is_stage_needed(pdf_path, "mineru"):
+        try:
+            auto_dir = engine.run(pdf_path, output_path)
+            tracker.mark_stage(pdf_path, "mineru", StageStatus.DONE)
+        except Exception as exc:
+            logger.critical(f"[{pdf_path.name}] MinerU 解析失败: {exc}", exc_info=True)
+            tracker.mark_stage(pdf_path, "mineru", StageStatus.FAILED, error=str(exc))
+            return False, str(exc)
+    else:
+        # 复用已有的 MinerU 输出目录
+        auto_dir = output_path / pdf_path.stem / "auto"
+        if not auto_dir.exists():
+            candidates = list((output_path / pdf_path.stem).glob("*/auto"))
+            if candidates:
+                auto_dir = candidates[0]
+            else:
+                err = f"[{pdf_path.name}] 跳过 MinerU，但未找到已有输出目录"
+                logger.error(err)
+                return False, err
+
+    # ---- 阶段 2: 版面分析 ----
+    if tracker.is_stage_needed(pdf_path, "layout"):
+        try:
+            layout_parser = LayoutParser(auto_dir)
+            layout_parser.parse()
+            summary = layout_parser.get_summary()
+            logger.info(f"[{pdf_path.name}] 版面分析摘要: {json.dumps(summary, ensure_ascii=False)}")
+
+            summary_path = pdf_meta_dir / "layout_summary.json"
+            layout_parser.save_summary(summary_path)
+            tracker.mark_stage(pdf_path, "layout", StageStatus.DONE)
+        except Exception as exc:
+            logger.error(f"[{pdf_path.name}] 版面分析失败: {exc}", exc_info=True)
+            tracker.mark_stage(pdf_path, "layout", StageStatus.FAILED, error=str(exc))
+            return False, str(exc)
+
+    # ---- 阶段 3: DeepSeek 翻译（可选） ----
+    if translator is not None:
+        if tracker.is_stage_needed(pdf_path, "translate"):
+            try:
+                layout_parser = LayoutParser(auto_dir)
+                layout_parser.parse()
+                translatable = layout_parser.get_translatable_elements()
+                if not translatable:
+                    logger.warning(f"[{pdf_path.name}] 未找到可翻译文本，跳过翻译")
+                    tracker.mark_stage(pdf_path, "translate", StageStatus.SKIPPED)
+                else:
+                    texts = [e.text for e in translatable]
+                    logger.info(f"[{pdf_path.name}] 待翻译文本段数: {len(texts)}")
+
+                    results = translator.translate_batch(texts, target_lang=target_lang)
+                    translated_path = pdf_meta_dir / "translated_content.json"
+                    translator.save_results(results, translated_path)
+
+                    success_count = sum(1 for r in results if r.success)
+                    logger.info(f"[{pdf_path.name}] 翻译完成: {success_count}/{len(results)} 成功")
+
+                    if save_markdown:
+                        md_lines: List[str] = []
+                        for idx, elem in enumerate(translatable):
+                            if idx < len(results) and results[idx].success:
+                                translated_text = results[idx].translated
+                            else:
+                                translated_text = elem.text
+
+                            if elem.element_type.value == "title":
+                                md_lines.append(f"# {translated_text}\n")
+                            elif elem.element_type.value in ("header", "footer", "page_number"):
+                                md_lines.append(f"*{translated_text}*\n")
+                            else:
+                                md_lines.append(f"{translated_text}\n")
+
+                        md_path = pdf_meta_dir / "translated.md"
+                        with open(md_path, "w", encoding="utf-8-sig") as f:
+                            f.write("\n".join(md_lines))
+                        logger.info(f"[{pdf_path.name}] 翻译 Markdown 已保存: {md_path}")
+
+                    tracker.mark_stage(pdf_path, "translate", StageStatus.DONE)
+            except Exception as exc:
+                logger.error(f"[{pdf_path.name}] 翻译失败: {exc}", exc_info=True)
+                tracker.mark_stage(pdf_path, "translate", StageStatus.FAILED, error=str(exc))
+                return False, str(exc)
+    else:
+        tracker.mark_stage(pdf_path, "translate", StageStatus.SKIPPED)
+
+    logger.info(f"[{pdf_path.name}] 全部阶段处理完毕")
+    return True, ""
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(
@@ -114,7 +283,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--input", "-i",
         type=Path,
         default=None,
-        help="待解析的 PDF 文件路径；未指定时使用配置文件中的 pipeline.input_path",
+        help="待解析的 PDF 文件或文件夹路径；未指定时使用配置文件中的 pipeline.input_path",
     )
     parser.add_argument(
         "--output", "-o",
@@ -156,6 +325,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="是否额外生成翻译后的 Markdown 文件",
     )
+    parser.add_argument(
+        "--recursive", "-r",
+        action="store_true",
+        help="扫描输入文件夹时递归子目录（仅在输入为目录时生效）",
+    )
     return parser
 
 
@@ -190,7 +364,7 @@ def main() -> int:
 
     if input_path is None or str(input_path) == "." or str(input_path) == "":
         logger.error(
-            "未指定输入 PDF 路径。请通过以下方式之一设置：\n"
+            "未指定输入路径。请通过以下方式之一设置：\n"
             "1. 命令行参数: --input / -i\n"
             "2. 配置文件: config/settings.yaml 的 pipeline.input_path"
         )
@@ -233,6 +407,7 @@ def main() -> int:
     mineru_exe = mineru_cfg.get("executable_path") or None
     backend = args.backend or mineru_cfg.get("backend", "pipeline")
     language = args.language or mineru_cfg.get("language", "ch")
+    recursive = args.recursive or pipeline_cfg.get("recursive", False)
 
     # 若环境变量存在 DEEPSEEK_API_KEY，也纳入备选
     deepseek_api_key = (
@@ -241,9 +416,21 @@ def main() -> int:
         or ""
     )
 
+    # ---- 收集 PDF 列表 ----
+    try:
+        pdf_files = collect_pdfs(input_path, recursive=recursive)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
+
+    if not pdf_files:
+        logger.error(f"未找到任何 PDF 文件: {input_path}")
+        return 1
+
     logger.info("=" * 50)
-    logger.info(f"输入 PDF : {args.input}")
+    logger.info(f"输入路径 : {args.input}")
     logger.info(f"输出目录 : {args.output}")
+    logger.info(f"PDF 数量 : {len(pdf_files)}")
     logger.info(f"后端模式 : {backend}")
     logger.info(f"文档语言 : {language}")
     logger.info(f"启用翻译 : {args.translate}")
@@ -251,32 +438,18 @@ def main() -> int:
         logger.info(f"目标语言 : {args.target_lang}")
     logger.info("=" * 50)
 
-    # ---- 阶段 1: MinerU 解析 ----
+    # ---- 初始化共享引擎与翻译器 ----
     try:
         engine = MinerUEngine(
             executable_path=mineru_exe,
             backend=backend,
             language=language,
         )
-        auto_dir = engine.run(args.input, args.output)
     except Exception as exc:
-        logger.critical(f"MinerU 解析失败: {exc}", exc_info=True)
+        logger.critical(f"MinerU 引擎初始化失败: {exc}", exc_info=True)
         return 1
 
-    # ---- 阶段 2: 版面分析 ----
-    try:
-        layout_parser = LayoutParser(auto_dir)
-        elements = layout_parser.parse()
-        summary = layout_parser.get_summary()
-        logger.info(f"版面分析摘要: {json.dumps(summary, ensure_ascii=False)}")
-
-        summary_path = Path(args.output) / "layout_summary.json"
-        layout_parser.save_summary(summary_path)
-    except Exception as exc:
-        logger.error(f"版面分析解析失败: {exc}", exc_info=True)
-        return 1
-
-    # ---- 阶段 3: DeepSeek 翻译（可选） ----
+    translator: Optional[DeepSeekTranslator] = None
     if args.translate:
         if not deepseek_api_key:
             logger.error(
@@ -285,62 +458,79 @@ def main() -> int:
                 "或设置环境变量 DEEPSEEK_API_KEY。"
             )
             return 1
+        translator = DeepSeekTranslator(
+            api_key=deepseek_api_key,
+            model=deepseek_cfg.get("model", "deepseek-chat"),
+            base_url=deepseek_cfg.get("base_url", "https://api.deepseek.com"),
+            max_retries=deepseek_cfg.get("max_retries", 3),
+            timeout=deepseek_cfg.get("timeout", 60),
+            batch_size=deepseek_cfg.get("batch_size", 16),
+        )
 
-        try:
-            translatable = layout_parser.get_translatable_elements()
-            if not translatable:
-                logger.warning("未找到可翻译的文本元素，跳过翻译")
-                return 0
+    # ---- 批量处理 ----
+    stats = {
+        "total": len(pdf_files),
+        "success": 0,
+        "skipped": 0,
+        "failed": 0,
+        "details": [],
+    }
 
-            texts = [e.text for e in translatable]
-            logger.info(f"待翻译文本段数: {len(texts)}")
+    for idx, pdf_path in enumerate(pdf_files, start=1):
+        logger.info(f"\n--- [{idx}/{len(pdf_files)}] 处理 {pdf_path.name} ---")
+        success, error = process_single_pdf(
+            pdf_path=pdf_path,
+            output_path=args.output,
+            engine=engine,
+            translator=translator,
+            target_lang=args.target_lang,
+            save_markdown=args.save_markdown,
+        )
 
-            translator = DeepSeekTranslator(
-                api_key=deepseek_api_key,
-                model=deepseek_cfg.get("model", "deepseek-chat"),
-                base_url=deepseek_cfg.get("base_url", "https://api.deepseek.com"),
-                max_retries=deepseek_cfg.get("max_retries", 3),
-                timeout=deepseek_cfg.get("timeout", 60),
-                batch_size=deepseek_cfg.get("batch_size", 16),
+        tracker = PipelineTracker(get_pdf_meta_dir(pdf_path, args.output))
+        all_done = tracker.all_done(["mineru", "layout"] + (["translate"] if args.translate else []))
+
+        if success and all_done:
+            # 进一步判断是否真正执行了（而非全部跳过）
+            overview = tracker.get_overview()
+            has_skip = any(
+                overview["stages"].get(s, {}).get("status") == "skipped"
+                for s in overview["stages"]
             )
+            if has_skip:
+                stats["skipped"] += 1
+            else:
+                stats["success"] += 1
+        elif all_done:
+            # 可能部分阶段跳过但整体无错误
+            stats["skipped"] += 1
+        else:
+            stats["failed"] += 1
 
-            results = translator.translate_batch(texts, target_lang=args.target_lang)
+        stats["details"].append({
+            "file": pdf_path.name,
+            "success": success,
+            "error": error,
+            "stages": tracker.get_overview()["stages"],
+        })
 
-            # 保存翻译结果
-            translated_path = Path(args.output) / "translated_content.json"
-            translator.save_results(results, translated_path)
+    # ---- 保存批量汇总 ----
+    batch_summary_path = args.output / "batch_summary.json"
+    with open(batch_summary_path, "w", encoding="utf-8-sig") as f:
+        json.dump(stats, f, ensure_ascii=False, indent=2)
 
-            # 统计
-            success_count = sum(1 for r in results if r.success)
-            logger.info(f"翻译完成: {success_count}/{len(results)} 成功")
+    # ---- 终端汇总报告 ----
+    logger.info("\n" + "=" * 50)
+    logger.info("批量转换汇总")
+    logger.info("=" * 50)
+    logger.info(f"总计 PDF  : {stats['total']}")
+    logger.info(f"成功完成  : {stats['success']}")
+    logger.info(f"增量跳过  : {stats['skipped']}")
+    logger.info(f"失败      : {stats['failed']}")
+    logger.info(f"详细日志见: logs/main_*.log")
+    logger.info("=" * 50)
 
-            # 可选：生成翻译后的 Markdown
-            if args.save_markdown:
-                md_lines: list[str] = []
-                for idx, elem in enumerate(translatable):
-                    if idx < len(results) and results[idx].success:
-                        translated_text = results[idx].translated
-                    else:
-                        translated_text = elem.text
-
-                    if elem.element_type.value == "title":
-                        md_lines.append(f"# {translated_text}\n")
-                    elif elem.element_type.value in ("header", "footer", "page_number"):
-                        md_lines.append(f"*{translated_text}*\n")
-                    else:
-                        md_lines.append(f"{translated_text}\n")
-
-                md_path = Path(args.output) / "translated.md"
-                with open(md_path, "w", encoding="utf-8-sig") as f:
-                    f.write("\n".join(md_lines))
-                logger.info(f"翻译 Markdown 已保存: {md_path}")
-
-        except Exception as exc:
-            logger.error(f"翻译阶段失败: {exc}", exc_info=True)
-            return 1
-
-    logger.info("全部流程执行完毕")
-    return 0
+    return 0 if stats["failed"] == 0 else 1
 
 
 if __name__ == "__main__":

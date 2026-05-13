@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -178,6 +179,96 @@ def _lang_to_suffix(lang: str) -> str:
     return mapping.get(lang, "translated")
 
 
+def _chunk_paragraphs(paragraphs: List[str], max_chars: int = 3000) -> List[str]:
+    """将段落列表按字符数分块，不拆分单个段落。
+
+    Args:
+        paragraphs: Markdown 按空行拆分后的段落列表。
+        max_chars: 每块最大字符数（默认 3000，约 1500 tokens）。
+
+    Returns:
+        分块后的字符串列表，每块包含一个或多个完整段落。
+    """
+    chunks: List[str] = []
+    current_chunk: List[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        para_len = len(para)
+        if current_len + para_len > max_chars and current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+            current_chunk = [para]
+            current_len = para_len
+        else:
+            current_chunk.append(para)
+            current_len += para_len
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
+
+
+def _translate_chunks(
+    chunks: List[str],
+    translator: DeepSeekTranslator,
+    target_lang: str,
+    system_prompt: str,
+    max_workers: int = 3,
+) -> List[str]:
+    """并发翻译多个 Markdown 分块，保持结果顺序。
+
+    Args:
+        chunks: 待翻译的 Markdown 分块列表。
+        translator: 已初始化的翻译器。
+        target_lang: 目标语言。
+        system_prompt: 自定义系统提示。
+        max_workers: 最大并发数。
+
+    Returns:
+        与 chunks 顺序对应的译文列表。
+    """
+    if not chunks:
+        return []
+
+    total = len(chunks)
+    logger.info(f"分块并发翻译，共 {total} 块，并发 {max_workers}")
+
+    results: List[Optional[str]] = [None] * total
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(
+                translator.translate_text,
+                chunk,
+                target_lang,
+                system_prompt,
+            ): idx
+            for idx, chunk in enumerate(chunks)
+        }
+
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                result = future.result()
+                if result.success:
+                    results[idx] = result.translated
+                    logger.info(f"块 {idx + 1}/{total} 翻译完成")
+                else:
+                    logger.error(f"块 {idx + 1}/{total} 翻译失败: {result.error}")
+                    results[idx] = chunks[idx]  # 失败时保留原文
+            except Exception as exc:
+                logger.error(f"块 {idx + 1}/{total} 翻译异常: {exc}", exc_info=True)
+                results[idx] = chunks[idx]  # 异常时保留原文
+
+    # 兜底：任何未填充的位置保留原文
+    for i in range(total):
+        if results[i] is None:
+            results[i] = chunks[i]
+
+    return [r for r in results if r is not None]
+
+
 def get_pdf_meta_dir(pdf_path: Path, output_path: Path) -> Path:
     """计算单个 PDF 对应的元数据子目录。
 
@@ -289,35 +380,40 @@ def process_single_pdf(
                         logger.warning(f"[{pdf_path.name}] Markdown 文件为空，跳过翻译")
                         tracker.mark_stage(pdf_path, "translate", StageStatus.SKIPPED)
                     else:
-                        logger.info(f"[{pdf_path.name}] Markdown 全文翻译，原文长度: {len(md_content)} 字符")
+                        logger.info(f"[{pdf_path.name}] Markdown 分块翻译，原文长度: {len(md_content)} 字符")
+
+                        # 按空行分割段落，分块并发翻译
+                        paragraphs = md_content.split("\n\n")
+                        chunks = _chunk_paragraphs(paragraphs, max_chars=3000)
+                        logger.info(f"[{pdf_path.name}] 共分 {len(chunks)} 块进行翻译")
 
                         system_prompt = (
                             f"You are a professional translator. "
-                            f"Translate the following Markdown document into {target_lang}. "
+                            f"Translate the following Markdown text into {target_lang}. "
                             f"CRITICAL REQUIREMENTS:\n"
                             f"1. Preserve ALL Markdown syntax exactly (headings, lists, tables, code blocks, etc.)\n"
                             f"2. Do NOT modify any image references like ![alt](path) or image paths\n"
                             f"3. Do NOT modify any URL links like [text](url)\n"
                             f"4. Do NOT modify any HTML tags\n"
                             f"5. Only translate natural language text content\n"
-                            f"6. Return the complete translated Markdown document, keeping the same structure"
+                            f"6. Return the complete translated text, keeping the same structure"
                         )
 
-                        result = translator.translate_text(
-                            md_content,
-                            target_lang=target_lang,
-                            system_prompt=system_prompt,
+                        translated_chunks = _translate_chunks(
+                            chunks,
+                            translator,
+                            target_lang,
+                            system_prompt,
+                            max_workers=translator.max_workers,
                         )
-
-                        if not result.success:
-                            raise RuntimeError(f"Markdown 翻译失败: {result.error}")
+                        translated_content = "\n\n".join(translated_chunks)
 
                         # 保存到 auto 目录，和原文并排
                         if save_markdown:
                             suffix = _lang_to_suffix(target_lang)
                             translated_md_path = md_path.parent / f"{pdf_path.stem}_{suffix}.md"
                             with open(translated_md_path, "w", encoding="utf-8-sig") as f:
-                                f.write(result.translated)
+                                f.write(translated_content)
                             logger.info(f"[{pdf_path.name}] 翻译 Markdown 已保存: {translated_md_path}")
 
                         tracker.mark_stage(pdf_path, "translate", StageStatus.DONE)

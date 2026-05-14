@@ -11,80 +11,198 @@
 - 支持 DeepSeek API **全文 Markdown 翻译**，保持原有格式、图片引用、表格结构不变。
 - 全链路日志追踪与单元测试覆盖。
 
-## 环境配置
+---
 
-### 1. 虚拟环境
+## 前置依赖
+
+本项目**不是** MinerU 本身，而是调用 MinerU CLI 的上层流水线。因此你需要**先独立安装 MinerU**，并确保命令行可以执行 `mineru`。
+
+### 1. 安装 MinerU CLI
+
+请参考官方仓库：[https://github.com/opendatalab/MinerU](https://github.com/opendatalab/MinerU)
+
+推荐方式（conda 环境）：
 
 ```bash
+# 创建并激活 conda 环境（官方推荐 Python 3.10）
+conda create -n doc python=3.10 -y
 conda activate doc
+
+# 安装 MinerU（请按官方最新命令执行）
+pip install mineru -i https://pypi.tuna.tsinghua.edu.cn/simple/
+
+# 验证安装
+mineru --help
 ```
 
-### 2. 安装依赖
+> **Windows 用户注意**：安装完成后，请在当前 conda `doc` 环境下执行 `mineru --help`，确认能正常输出帮助信息。如果提示找不到命令，请检查 conda 环境的 `Scripts/` 目录是否在 PATH 中。
+
+### 2. 安装本项目的 Python 依赖
 
 ```bash
+# 同样建议在 doc 环境下执行
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 ```
 
-### 3. 配置 MinerU 与 DeepSeek
+依赖清单：
+- `requests` — HTTP 请求库
+- `pyyaml` — YAML 配置解析
+- `python-dotenv` — 从 `.env` 文件加载环境变量
 
-#### 3.1 编辑 `config/settings.yaml`（常用配置）
+---
 
-```yaml
-mineru:
-  # 若 mineru.exe 不在 conda doc 环境或系统 PATH，请填写绝对路径
-  executable_path: ""
+## 快速开始（手把手三步跑通）
 
-deepseek:
-  # 推荐将 API Key 写入 .env 文件（DEEPSEEK_API_KEY=...），避免泄露
-  # 若此处留空，程序会自动读取 .env 或环境变量
-  api_key: ""
-  # 翻译目标语言：中文、英文、日文 等
-  target_lang: "中文"
+### 第一步：获取代码
 
-pipeline:
-  # 输入路径：单个 PDF 文件，或包含多个 PDF 的文件夹
-  input_path: "D:/project/python_release/avation_doc/input"
-  # 输出路径：解析与翻译结果存放目录
-  output_path: "D:/project/python_release/avation_doc/output"
-  # 是否启用 DeepSeek 翻译（false = 仅解析，不翻译）
-  translate: true
-  # 是否保存翻译后的 Markdown 文件
-  save_markdown: true
-
-logging:
-  # 日志级别：DEBUG / INFO / WARNING / ERROR
-  level: "INFO"
+```bash
+git clone https://github.com/chenchen8486/layout-analysis.git
+cd layout-analysis
 ```
 
-#### 3.2 配置 `.env` 文件（推荐，安全存储 API Key）
+### 第二步：配置 API Key（翻译必需）
 
 在项目根目录创建 `.env` 文件：
 
 ```bash
-# DeepSeek API Key（此文件已加入 .gitignore，不会被提交）
+# Windows: 直接新建文件
+notepad .env
+
+# Linux / macOS:
+touch .env
+```
+
+写入你的 DeepSeek API Key：
+
+```text
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-#### 3.3 或通过环境变量设置
+> **如何获取 API Key？**
+> 1. 访问 [DeepSeek 开放平台](https://platform.deepseek.com/)
+> 2. 注册 / 登录账号
+> 3. 进入「API Keys」页面，点击「创建 API Key」
+> 4. 复制以 `sk-` 开头的密钥，粘贴到 `.env` 文件中
+> 5. 请妥善保管，**不要提交到 Git**（`.env` 已加入 `.gitignore`）
 
-```bash
-set MINERU_PATH=C:\Users\chenc\anaconda3\envs\doc\Scripts\mineru.exe
-set DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+### 第三步：配置输入输出路径
+
+打开 `config/settings.yaml`，修改 `pipeline` 段：
+
+```yaml
+pipeline:
+  # 输入路径：单个 PDF 文件，或包含多个 PDF 的文件夹
+  input_path: "D:/your_data/input"
+  # 输出路径：解析与翻译结果存放目录（会自动创建）
+  output_path: "D:/your_data/output"
+  # 是否启用 DeepSeek 翻译（false = 仅解析，不翻译）
+  translate: true
+  # 是否保存翻译后的 Markdown 文件
+  save_markdown: true
 ```
 
-## 快速启动
+**路径配置示例**：
+
+| 场景 | `input_path` 写法 | `output_path` 写法 |
+|---|---|---|
+| 单文件 | `D:/data/report.pdf` | `D:/outputs/report` |
+| 文件夹（批量） | `D:/data/pdfs` | `D:/outputs` |
+| 相对路径（项目内） | `./my_pdfs` | `./my_outputs` |
+
+> **Windows 路径建议**：使用正斜杠 `/`（如 `D:/data/input`），或加 `r` 前缀（如 `r"D:\data\input"`）。直接使用反斜杠 `\` 会导致 YAML 解析失败。
+
+### 运行
+
+配置完成后，在 PyCharm / VS Code 中直接右键运行 `main.py`，或在终端执行：
+
+```bash
+python main.py
+```
+
+程序会自动读取 `config/settings.yaml` 和 `.env`，无需额外命令行参数。
+
+---
+
+## 完整配置指南
+
+### `config/settings.yaml` 逐项说明
+
+```yaml
+# ── MinerU 配置 ──
+mineru:
+  # 【可选】显式指定 mineru.exe 的绝对路径
+  # 留空时程序自动按以下顺序查找：
+  #   1. conda doc 环境的 Scripts/mineru.exe
+  #   2. 环境变量 MINERU_PATH
+  #   3. 系统 PATH
+  executable_path: ""
+
+# ── DeepSeek 翻译配置 ──
+deepseek:
+  # 【不推荐】直接把 API Key 写在这里。优先使用 .env 文件。
+  # 如果此处留空，程序自动读取：
+  #   1. .env 文件的 DEEPSEEK_API_KEY
+  #   2. 系统环境变量 DEEPSEEK_API_KEY
+  api_key: ""
+
+  # 翻译目标语言，支持：中文、英文、日文、韩文、法文、德文
+  target_lang: "中文"
+
+# ── 流水线配置 ──
+pipeline:
+  # 输入路径（必填）：PDF 文件或包含 PDF 的文件夹
+  input_path: ""
+
+  # 输出路径（必填）：结果存放目录，不存在会自动创建
+  output_path: ""
+
+  # 是否启用翻译（true/false）
+  translate: true
+
+  # 是否保存翻译后的 Markdown
+  save_markdown: true
+
+  # 【可选】扫描文件夹时递归子目录
+  recursive: false
+
+# ── 日志配置 ──
+logging:
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  # DEBUG 会输出最详细的信息，适合排错
+  level: "INFO"
+```
+
+### 不修改代码的情况下调整翻译参数
+
+在 `config/settings.yaml` 的 `deepseek` 段下添加以下任一项即可覆盖代码默认值：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `model` | `deepseek-chat` | 使用的模型名称 |
+| `base_url` | `https://api.deepseek.com` | API 基础地址 |
+| `batch_size` | 32 | 每批翻译段落数 |
+| `temperature` | 0.1 | 生成温度，越低越稳定 |
+| `max_workers` | 3 | 并发线程数 |
+| `max_retries` | 3 | 失败重试次数 |
+| `timeout` | 60 | 单次请求超时（秒） |
+
+示例：
+
+```yaml
+deepseek:
+  api_key: ""
+  target_lang: "中文"
+  batch_size: 48
+  temperature: 0.05
+```
+
+---
+
+## 运行方式详解
 
 ### 方式一：IDE 直接运行（推荐日常开发）
 
 在 `config/settings.yaml` 的 `pipeline` 段配置好路径后，直接在 PyCharm / VS Code 中右键运行 `main.py`，无需输入任何命令行参数。
-
-```yaml
-pipeline:
-  input_path: "./data/"           # 文件夹路径 → 批量转换
-  output_path: "./outputs/"
-  translate: true
-  save_markdown: true
-```
 
 ### 方式二：命令行运行（适合脚本化、批处理）
 
@@ -100,9 +218,26 @@ python main.py -i "D:/docs/" -o "D:/outputs/"
 # 递归扫描子目录
 python main.py -i "D:/docs/" -o "D:/outputs/" -r
 
-# 解析 + 翻译为中文
+# 解析 + 翻译为中文，并保存 Markdown
 python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" -t --target-lang 中文 -m
+
+# 仅解析，不翻译
+python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" --no-translate
 ```
+
+常用命令行参数：
+
+| 参数 | 简写 | 说明 |
+|---|---|---|
+| `--input` | `-i` | 输入 PDF 文件或文件夹路径 |
+| `--output` | `-o` | 输出目录路径 |
+| `--config` | `-c` | 指定自定义配置文件路径 |
+| `--translate` | `-t` | 启用翻译 |
+| `--target-lang` | | 翻译目标语言 |
+| `--save-markdown` | `-m` | 保存翻译后的 Markdown |
+| `--recursive` | `-r` | 递归扫描子目录 |
+
+---
 
 ## 输出目录结构
 
@@ -122,6 +257,8 @@ outputs/
 │   └── ...
 └── batch_summary.json               # 本次批量运行总览（成功/跳过/失败统计）
 ```
+
+---
 
 ## 目录结构
 
@@ -153,6 +290,8 @@ layout_analysis/
 └── README.md
 ```
 
+---
+
 ## 程序框架与调用流程
 
 ```text
@@ -180,6 +319,8 @@ main.py
   │
   └── batch_summary.json      ← 批量运行总览
 ```
+
+---
 
 ## 增量转换机制
 
@@ -218,17 +359,56 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 "
 ```
 
-## 翻译提效参数（代码内置默认值）
+---
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `batch_size` | 32 | 每批翻译段落数，增大可减少请求次数 |
-| `temperature` | 0.1 | 生成温度，越低输出越稳定、确定性越高 |
-| `max_workers` | 3 | 并发线程数，同时发送 3 个 batch |
-| `max_retries` | 3 | 失败重试次数 |
-| `timeout` | 60 | 单次请求超时秒数 |
+## 常见问题排查
 
-如需调整，可在 `config/settings.yaml` 的 `deepseek` 段下添加对应项（如 `batch_size: 48`），代码会自动读取。不常用参数保持代码默认值即可。
+### Q1: 报错「未找到 MinerU 可执行文件」
+
+**原因**：当前环境没有安装 MinerU，或不在 PATH 中。
+
+**解决**：
+1. 确认已激活 conda `doc` 环境：`conda activate doc`
+2. 验证安装：`mineru --help`
+3. 若仍报错，在 `config/settings.yaml` 中显式指定路径：
+   ```yaml
+   mineru:
+     executable_path: "C:/Users/xxx/anaconda3/envs/doc/Scripts/mineru.exe"
+   ```
+
+### Q2: 报错「启用翻译但未找到 DeepSeek API Key」
+
+**原因**：`.env` 文件不存在，或文件中的 Key 名称写错。
+
+**解决**：
+1. 确认项目根目录存在 `.env` 文件
+2. 确认内容为 `DEEPSEEK_API_KEY=sk-...`（不是 `api_key=` 或其他名称）
+3. 确认没有多余的空格或引号
+
+### Q3: 配置文件解析失败，提示「不可打印字符」
+
+**原因**：Windows 路径中的反斜杠 `\` 在 YAML 双引号字符串内被当作转义符。
+
+**解决**（任选其一）：
+- 路径前加 `r` 前缀：`input_path: r"D:\data\input"`
+- 改用单引号：`input_path: 'D:\data\input'`
+- 反斜杠改斜杠：`input_path: D:/data/input`
+
+### Q4: 翻译后的 Markdown 内容缺失
+
+**原因**：早期版本使用全文一次性翻译，当 PDF 内容过长时，API 输出会被截断。
+
+**解决**：
+- 请确保使用的是最新代码（已改为分块并发翻译，每块约 3000 字符，默认 3 线程并发）
+- 如仍有问题，尝试减小 `batch_size` 或增大 `timeout`
+
+### Q5: 如何只解析不翻译？
+
+两种方法：
+1. 修改 `config/settings.yaml`：`translate: false`
+2. 命令行覆盖：`python main.py -i ./input -o ./output --no-translate`
+
+---
 
 ## 测试
 
@@ -240,8 +420,11 @@ python -m unittest discover -s tests -v
 python -m unittest tests.test_pipeline_tracker -v
 ```
 
+---
+
 ## 变更记录
 
+- **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。
 - **2026-05-13**: 初始化工程结构，完成全部模块开发。
 - **2026-05-13**: 支持 YAML 配置中 `r"..."` 原始字符串与 Windows 反斜杠路径。
 - **2026-05-13**: 新增批量转换与增量转换能力，引入 `PipelineTracker` 状态追踪模块，支持文件夹输入、断点续传与批量汇总报告。

@@ -51,6 +51,45 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 
 ---
 
+## Linux / macOS 适配说明
+
+本项目代码基于 `pathlib` 与标准库实现，**完全支持 Linux 与 macOS**。Windows 用户可直接按后续章节操作；Linux / macOS 用户请额外注意以下三点差异即可：
+
+### 1. 配置文件中的路径写法
+
+`config/settings.yaml` 中的 `input_path` 与 `output_path` 请使用 Linux 绝对路径或相对路径：
+
+```yaml
+pipeline:
+  input_path: "/home/用户名/data/input"
+  output_path: "/home/用户名/data/output"
+```
+
+> 相对路径（如 `./my_pdfs`）在任何平台均通用。
+
+### 2. MinerU 可执行文件路径
+
+Linux / macOS 下 conda 环境的可执行文件位于 `bin/` 目录，且没有 `.exe` 后缀。若程序提示「未找到 MinerU」，请在 `config/settings.yaml` 中显式指定：
+
+```yaml
+mineru:
+  executable_path: "/home/用户名/anaconda3/envs/doc/bin/mineru"
+```
+
+> 若已将 conda `doc` 环境激活，且 `mineru --help` 能正常输出，则通常无需额外配置，程序会通过系统 PATH 自动找到。
+
+### 3. `.env` 文件创建
+
+Linux / macOS 下使用终端命令创建：
+
+```bash
+touch .env
+```
+
+然后用任意文本编辑器（如 `vim`、`nano`、`gedit`）写入 `DEEPSEEK_API_KEY=sk-...` 即可。
+
+---
+
 ## 快速开始（手把手三步跑通）
 
 ### 第一步：获取代码
@@ -371,9 +410,17 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 1. 确认已激活 conda `doc` 环境：`conda activate doc`
 2. 验证安装：`mineru --help`
 3. 若仍报错，在 `config/settings.yaml` 中显式指定路径：
+
+   **Windows**：
    ```yaml
    mineru:
      executable_path: "C:/Users/xxx/anaconda3/envs/doc/Scripts/mineru.exe"
+   ```
+
+   **Linux / macOS**：
+   ```yaml
+   mineru:
+     executable_path: "/home/xxx/anaconda3/envs/doc/bin/mineru"
    ```
 
 ### Q2: 报错「启用翻译但未找到 DeepSeek API Key」

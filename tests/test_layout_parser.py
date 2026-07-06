@@ -67,5 +67,46 @@ class TestLayoutParser(unittest.TestCase):
         self.assertEqual(summary["translatable_count"], 2)
 
 
+class TestLayoutParserWithFixture(unittest.TestCase):
+    """使用真实 MinerU 输出快照的回归测试。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture_dir = Path(__file__).resolve().parent / "fixtures" / "sample_mineru_output"
+
+    def test_parse_fixture(self):
+        """快照应被正确解析为 10 个元素。"""
+        parser = LayoutParser(self.fixture_dir)
+        elements = parser.parse()
+        self.assertEqual(len(elements), 10)
+
+    def test_fixture_summary(self):
+        """快照摘要应包含预期的类型分布与页数。"""
+        parser = LayoutParser(self.fixture_dir)
+        summary = parser.get_summary()
+        self.assertEqual(summary["total_elements"], 10)
+        self.assertEqual(summary["page_count"], 2)
+        self.assertIn("title", summary["type_distribution"])
+        self.assertIn("text", summary["type_distribution"])
+        self.assertIn("image", summary["type_distribution"])
+        self.assertIn("table", summary["type_distribution"])
+
+    def test_fixture_table_body(self):
+        """table 元素应使用 table_body 作为文本。"""
+        parser = LayoutParser(self.fixture_dir)
+        parser.parse()
+        tables = parser.filter_by_type(ElementType.TABLE)
+        self.assertEqual(len(tables), 1)
+        self.assertIn("Header A", tables[0].text)
+
+    def test_fixture_unknown_type(self):
+        """未知类型应被映射为 UNKNOWN，不中断解析。"""
+        parser = LayoutParser(self.fixture_dir)
+        parser.parse()
+        unknowns = parser.filter_by_type(ElementType.UNKNOWN)
+        self.assertEqual(len(unknowns), 1)
+        self.assertEqual(unknowns[0].text, "Unknown element")
+
+
 if __name__ == "__main__":
     unittest.main()

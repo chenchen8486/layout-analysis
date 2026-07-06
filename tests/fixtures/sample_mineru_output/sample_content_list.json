@@ -1,0 +1,66 @@
+[
+  {
+    "type": "title",
+    "text": "Sample Document Title",
+    "page_idx": 0,
+    "bbox": [100.0, 80.0, 500.0, 120.0],
+    "level": 1
+  },
+  {
+    "type": "text",
+    "text": "This is the first paragraph of the sample document. It contains plain text for translation testing.",
+    "page_idx": 0,
+    "bbox": [100.0, 150.0, 500.0, 200.0]
+  },
+  {
+    "type": "text",
+    "text": "Here is a second paragraph, used to verify that the layout parser can handle multiple text elements on the same page.",
+    "page_idx": 0,
+    "bbox": [100.0, 220.0, 500.0, 270.0]
+  },
+  {
+    "type": "image",
+    "text": "",
+    "page_idx": 0,
+    "bbox": [120.0, 300.0, 480.0, 420.0],
+    "img_path": "images/sample_image_1.png"
+  },
+  {
+    "type": "table",
+    "text": "",
+    "table_body": "<table><tr><th>Header A</th><th>Header B</th></tr><tr><td>Cell 1</td><td>Cell 2</td></tr></table>",
+    "page_idx": 0,
+    "bbox": [100.0, 450.0, 500.0, 520.0],
+    "table_caption": "Table 1: Sample Table"
+  },
+  {
+    "type": "text",
+    "text": "A paragraph on the second page, demonstrating page_idx handling.",
+    "page_idx": 1,
+    "bbox": [100.0, 100.0, 500.0, 150.0]
+  },
+  {
+    "type": "header",
+    "text": "Section Header",
+    "page_idx": 1,
+    "bbox": [100.0, 60.0, 300.0, 90.0]
+  },
+  {
+    "type": "footer",
+    "text": "Page footer text",
+    "page_idx": 1,
+    "bbox": [100.0, 700.0, 500.0, 730.0]
+  },
+  {
+    "type": "page_number",
+    "text": "2",
+    "page_idx": 1,
+    "bbox": [500.0, 700.0, 540.0, 730.0]
+  },
+  {
+    "type": "unknown_type_for_test",
+    "text": "Unknown element",
+    "page_idx": 1,
+    "bbox": [100.0, 750.0, 200.0, 780.0]
+  }
+]

@@ -28,8 +28,8 @@
 conda create -n doc python=3.10 -y
 conda activate doc
 
-# 安装 MinerU（请按官方最新命令执行）
-pip install mineru -i https://pypi.tuna.tsinghua.edu.cn/simple/
+# 安装 MinerU（推荐固定到已验证版本 3.4.2）
+pip install "mineru==3.4.2" -i https://pypi.tuna.tsinghua.edu.cn/simple/
 
 # 验证安装
 mineru --help
@@ -109,7 +109,7 @@ MinerU 升级后，真正影响本工程的只有三个**耦合面**：
 
 | 本工程版本 | MinerU 版本 | 验证日期 | 备注 |
 |-----------|------------|---------|------|
-| 0.1.0     | 待填写     | 待填写  | 首次验证后补充 |
+| 0.1.0     | 3.4.2      | 2026-07-06 | 基于 `D:\project\ai_tools\MinerU-master` 源码版本验证 |
 
 ---
 
@@ -535,6 +535,7 @@ python -m unittest tests.test_pipeline_tracker -v
 
 ## 变更记录
 
+- **2026-07-06**: 锁定 MinerU 兼容版本为 3.4.2，更新 README 安装指引与 `requirements.txt`。
 - **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`；`main.py` 支持 `settings.local.yaml` 本地覆盖；翻译逻辑从 `main.py` 下沉至 `core/translator.py`。
 - **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。
 - **2026-05-13**: 初始化工程结构，完成全部模块开发。

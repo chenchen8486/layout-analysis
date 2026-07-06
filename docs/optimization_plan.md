@@ -269,7 +269,7 @@
 | 8 | 整理 `main.py`，把翻译/分块逻辑下沉到 `core/translator.py` | P1 | 否 | ✅ 已完成 |
 | 9 | 在 `MinerUEngine` 中集中处理输出目录推断 | P2 | 否 | ✅ 已完成 |
 | 10 | 增加 `tests/fixtures/` MinerU 输出快照 | P2 | 否 | ✅ 已完成 |
-| 11 | 在 README 中增加 MinerU 版本兼容性表格 | P2 | 否 | ⏳ 表格已存在，待验证 MinerU 版本后填写 |
+| 11 | 在 README 中增加 MinerU 版本兼容性表格 | P2 | 否 | ✅ 已完成（版本 3.4.2） |
 | 12 | 修复 `setup_logger` 二次初始化问题 | P2 | 否 | ✅ 已完成 |
 | 13 | 决议并启动 UI 开发（可选） | P3 | 否 | ⏳ 暂缓 |
 

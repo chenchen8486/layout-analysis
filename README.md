@@ -113,6 +113,80 @@ MinerU 升级后，真正影响本工程的只有三个**耦合面**：
 
 ---
 
+## 本工程与本地深度学习模型的关系
+
+### 本工程不直接加载本地模型
+
+`layout_analysis` 本身**不直接调用**任何本地深度学习模型。它通过 `core/mineru_engine.py` 调用 MinerU CLI，由 MinerU 内部完成版面分析、OCR、公式识别、表格识别等任务。本工程只负责解析 MinerU 输出的 JSON 与 Markdown。
+
+因此：
+
+- 本工程目录下**没有** `.pth` / `.safetensors` / `.onnx` 等模型文件。
+- 所有模型文件都在 MinerU 的模型缓存目录中。
+- `core/translator.py` 中的 DeepSeek 仅用于 Markdown 翻译，**不用于 OCR 或版面分析**。
+
+### MinerU 内部使用的模型
+
+MinerU 3.4.2 默认从 Hugging Face 仓库 `opendatalab/PDF-Extract-Kit-1.0` 下载模型。已验证的模型清单如下：
+
+| 任务 | 模型 / 目录 | 说明 |
+|------|------------|------|
+| 版面分析 | `models/Layout/PP-DocLayoutV2` | PP-DocLayoutV2 版面分析模型 |
+| OCR | `models/OCR/paddleocr_torch` | PaddleOCR PyTorch 版本 |
+| 公式识别 | `models/MFR/unimernet_hf_small_2503` | UniMERNet 公式识别模型 |
+| 文档方向分类 | `models/OriCls/paddle_orientation_classification` | Paddle 方向分类模型 |
+| 表格分类 | `models/TabCls/paddle_table_cls` | 表格/非表格分类模型 |
+| 表格结构识别 | `models/TabRec/SlanetPlus` | SLANet+ 表格结构识别 |
+| 表格单元格识别 | `models/TabRec/UnetStructure` | UNet 表格单元格定位 |
+
+### 模型文件在本机的默认位置
+
+MinerU 使用 `huggingface_hub.snapshot_download` 下载模型，默认缓存到 Hugging Face 缓存目录。以当前环境为例，完整路径为：
+
+```text
+C:\Users\chenc\.cache\huggingface\hub\
+└── models--opendatalab--PDF-Extract-Kit-1.0/
+    └── snapshots/
+        └── d1336ee3c2975a8b26c4b09ff39dc6b593d34141/
+            └── models/
+                ├── Layout/PP-DocLayoutV2/
+                │   ├── config.json
+                │   ├── model.safetensors
+                │   └── preprocessor_config.json
+                ├── OCR/paddleocr_torch/
+                │   ├── ch_PP-OCRv4_rec_server_doc_infer.pth
+                │   ├── ch_PP-OCRv5_det_infer.pth
+                │   └── ch_PP-OCRv5_rec_infer.pth
+                ├── MFR/unimernet_hf_small_2503/
+                │   ├── config.json
+                │   ├── model.safetensors
+                │   ├── tokenizer.json
+                │   └── tokenizer_config.json
+                ├── OriCls/paddle_orientation_classification/
+                ├── TabCls/paddle_table_cls/
+                └── TabRec/
+                    ├── SlanetPlus/
+                    └── UnetStructure/
+```
+
+> 注意：`snapshots/` 下的哈希文件夹名称会随 MinerU 版本或模型更新而变化。如果你配置了 `HF_HOME` 环境变量，缓存目录会移到 `HF_HOME/hub/` 下。
+
+### 如何自定义模型缓存位置
+
+如需把模型放到其他磁盘（如空间更大的 D 盘），可在运行 MinerU 前设置环境变量：
+
+```bash
+# Windows (PowerShell)
+$env:HF_HOME = "D:/huggingface_cache"
+
+# Linux / macOS
+export HF_HOME="/path/to/huggingface_cache"
+```
+
+设置后，MinerU 会自动将新模型下载到指定目录。
+
+---
+
 ## Linux / macOS 适配说明
 
 本项目代码基于 `pathlib` 与标准库实现，**完全支持 Linux 与 macOS**。Windows 用户可直接按后续章节操作；Linux / macOS 用户请额外注意以下三点差异即可：
@@ -535,6 +609,7 @@ python -m unittest tests.test_pipeline_tracker -v
 
 ## 变更记录
 
+- **2026-07-06**: 新增「本工程与本地深度学习模型的关系」章节，说明 MinerU 内部模型清单与本机缓存路径。
 - **2026-07-06**: 锁定 MinerU 兼容版本为 3.4.2，更新 README 安装指引与 `requirements.txt`。
 - **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`；`main.py` 支持 `settings.local.yaml` 本地覆盖；翻译逻辑从 `main.py` 下沉至 `core/translator.py`。
 - **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。

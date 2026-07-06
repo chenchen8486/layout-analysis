@@ -1,6 +1,7 @@
 """MinerUEngine 单元测试。"""
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -34,6 +35,39 @@ class TestMinerUEngine(unittest.TestCase):
         with patch.object(Path, "exists", return_value=False):
             with self.assertRaises(FileNotFoundError):
                 engine.run(Path("C:/fake/test.pdf"), Path("C:/fake/out"))
+
+    def test_resolve_auto_dir_default(self):
+        """存在 output_dir/stem/auto 时直接返回。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            pdf = out / "sample.pdf"
+            pdf.write_text("fake")
+            (out / "sample" / "auto").mkdir(parents=True)
+
+            result = MinerUEngine.resolve_auto_dir(pdf, out)
+            self.assertEqual(result, out / "sample" / "auto")
+
+    def test_resolve_auto_dir_nested(self):
+        """不存在 auto 但存在 mode/auto 时返回第一个。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            pdf = out / "sample.pdf"
+            pdf.write_text("fake")
+            (out / "sample" / "pipeline" / "auto").mkdir(parents=True)
+
+            result = MinerUEngine.resolve_auto_dir(pdf, out)
+            self.assertEqual(result, out / "sample" / "pipeline" / "auto")
+
+    def test_resolve_auto_dir_fallback(self):
+        """无 auto 目录时回退到 stem 目录。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            pdf = out / "sample.pdf"
+            pdf.write_text("fake")
+            (out / "sample").mkdir(parents=True)
+
+            result = MinerUEngine.resolve_auto_dir(pdf, out)
+            self.assertEqual(result, out / "sample")
 
 
 if __name__ == "__main__":

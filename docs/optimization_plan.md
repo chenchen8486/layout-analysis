@@ -267,7 +267,7 @@
 | 6 | 同步 `README.md` / `docs/design.md` 与代码实际结构 | P1 | 否 | ✅ 已完成 |
 | 7 | 统一 API Key 优先级并同步文档 | P1 | 否 | ✅ 已确认方案 B，文档与代码已对齐 |
 | 8 | 整理 `main.py`，把翻译/分块逻辑下沉到 `core/translator.py` | P1 | 否 | ✅ 已完成 |
-| 9 | 在 `MinerUEngine` 中集中处理输出目录推断 | P2 | 否 | ⏳ 待做 |
+| 9 | 在 `MinerUEngine` 中集中处理输出目录推断 | P2 | 否 | ✅ 已完成 |
 | 10 | 增加 `tests/fixtures/` MinerU 输出快照 | P2 | 否 | ⏳ 待做 |
 | 11 | 在 README 中增加 MinerU 版本兼容性表格 | P2 | 否 | ⏳ 待做 |
 | 12 | 修复 `setup_logger` 二次初始化问题 | P2 | 否 | ⏳ 待做 |

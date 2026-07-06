@@ -86,6 +86,37 @@ class MinerUEngine:
         logger.error(err)
         raise RuntimeError(err)
 
+    @staticmethod
+    def resolve_auto_dir(pdf_path: Path, output_dir: Path) -> Path:
+        """推断 MinerU 实际输出的 auto 子目录。
+
+        MinerU 默认输出结构为 ``output_dir/<pdf_stem>/auto/``。
+        若该目录不存在，则尝试查找 ``output_dir/<pdf_stem>/*/auto``；
+        仍不存在则回退到 ``output_dir/<pdf_stem>``。
+
+        Args:
+            pdf_path: 原始 PDF 文件路径。
+            output_dir: MinerU 总输出目录。
+
+        Returns:
+            推断出的 MinerU 输出子目录。
+        """
+        pdf_path = Path(pdf_path)
+        output_dir = Path(output_dir)
+        stem_dir = output_dir / pdf_path.stem
+
+        auto_dir = stem_dir / "auto"
+        if auto_dir.exists():
+            return auto_dir
+
+        candidates = sorted(stem_dir.glob("*/auto"))
+        if candidates:
+            logger.info(f"MinerU 输出目录推断为: {candidates[0]}")
+            return candidates[0]
+
+        logger.warning(f"未找到预期的 auto 子目录，回退到: {stem_dir}")
+        return stem_dir
+
     def run(self, pdf_path: Path, output_dir: Path) -> Path:
         """执行 MinerU 解析任务。
 
@@ -143,11 +174,4 @@ class MinerUEngine:
                 f"MinerU 进程异常退出（返回码 {result.returncode}），详见日志"
             )
 
-        # MinerU 默认输出结构：output_dir/<stem>/<mode>/
-        auto_dir = output_dir / pdf_path.stem / "auto"
-        if auto_dir.exists():
-            logger.info(f"MinerU 输出目录: {auto_dir}")
-            return auto_dir
-
-        logger.warning(f"未找到预期的 auto 子目录，返回上级目录: {output_dir / pdf_path.stem}")
-        return output_dir / pdf_path.stem
+        return self.resolve_auto_dir(pdf_path, output_dir)

@@ -251,15 +251,11 @@ def process_single_pdf(
             return False, str(exc)
     else:
         # 复用已有的 MinerU 输出目录
-        auto_dir = output_path / pdf_path.stem / "auto"
-        if not auto_dir.exists():
-            candidates = list((output_path / pdf_path.stem).glob("*/auto"))
-            if candidates:
-                auto_dir = candidates[0]
-            else:
-                err = f"[{pdf_path.name}] 跳过 MinerU，但未找到已有输出目录"
-                logger.error(err)
-                return False, err
+        auto_dir = engine.resolve_auto_dir(pdf_path, output_path)
+        if auto_dir == output_path / pdf_path.stem and not auto_dir.exists():
+            err = f"[{pdf_path.name}] 跳过 MinerU，但未找到已有输出目录"
+            logger.error(err)
+            return False, err
 
     # ---- 阶段 2: 版面分析 ----
     layout_parser: Optional[LayoutParser] = None

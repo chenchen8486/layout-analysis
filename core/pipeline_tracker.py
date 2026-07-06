@@ -168,17 +168,17 @@ class PipelineTracker:
         return dict(self._state)
 
     def all_done(self, stages_to_check: Optional[List[str]] = None) -> bool:
-        """检查指定阶段是否全部完成。
+        """检查指定阶段是否全部完成或跳过。
 
         Args:
             stages_to_check: 待检查的阶段列表；None 则检查全部阶段。
 
         Returns:
-            全部完成返回 True，否则 False。
+            全部完成或跳过返回 True，否则 False。
         """
         targets = stages_to_check or list(self.STAGES)
         for stage in targets:
             info = StageInfo.from_dict(self._state["stages"].get(stage, {}))
-            if info.status != StageStatus.DONE:
+            if info.status not in (StageStatus.DONE, StageStatus.SKIPPED):
                 return False
         return True

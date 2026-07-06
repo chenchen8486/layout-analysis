@@ -13,10 +13,12 @@
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | 配置 | `config/settings.yaml` | MinerU 路径、DeepSeek API Key、日志级别等 |
+| 配置覆盖 | `config/settings.local.yaml` | 本地个人路径 / 密钥覆盖，不提交 Git |
 | 日志 | `utils/logger.py` | 统一日志（文件 + 控制台，utf-8-sig） |
 | MinerU 引擎 | `core/mineru_engine.py` | 封装 CLI 调用，自动查找可执行文件 |
 | 版面解析 | `core/layout_parser.py` | 解析 JSON 输出，提取可翻译元素，生成统计摘要 |
-| 翻译器 | `core/translator.py` | 调用 DeepSeek API，支持批量、重试、分隔符策略 |
+| 流水线追踪 | `core/pipeline_tracker.py` | 维护 `pipeline_state.json`，支持增量转换与断点续传 |
+| 翻译器 | `core/translator.py` | 调用 DeepSeek API，支持单条、批量、Markdown 全文翻译与重试 |
 | 入口 | `main.py` | CLI 入口，串联整条流水线 |
 | 测试 | `tests/` | 各模块单元测试 |
 
@@ -26,26 +28,34 @@
 用户命令: python main.py --input xxx.pdf --output out/ --translate --target-lang 英文
     │
     ▼
-加载 config/settings.yaml
+加载 .env 中的环境变量（如 DEEPSEEK_API_KEY）
     │
     ▼
-MinerUEngine.run(input_pdf, output_dir)
-    └── subprocess.run(mineru.exe -p ... -o ... --backend pipeline)
+加载 config/settings.yaml，若存在则合并 config/settings.local.yaml
     │
     ▼
-LayoutParser.parse(auto_dir)
-    └── 读取 *_content_list.json → List[LayoutElement]
+collect_pdfs(input_path) → 扫描输入路径（文件或文件夹）
     │
     ▼
-（若 --translate）
-DeepSeekTranslator.translate_batch(texts, target_lang)
-    └── 按 batch_size 切片 → 拼接为单请求（---PARAGRAPH_BREAK--- 分隔）
-    └── 指数退避重试 → 拆分回段落级结果
+for pdf_path in pdf_list:
+    │
+    ├── PipelineTracker(output_subdir) 检查 pipeline_state.json
+    │       └── 阶段为 done 且源文件未变更则跳过
+    │
+    ├── MinerUEngine.run(input_pdf, output_dir)  [若 mineru 阶段需执行]
+    │       └── subprocess.run(mineru.exe -p ... -o ... --backend pipeline)
+    │       └── 生成 {stem}/auto/{stem}.md 与 {stem}_content_list.json
+    │
+    ├── LayoutParser.parse(auto_dir)  [若 layout 阶段需执行]
+    │       └── 读取 *_content_list.json → List[LayoutElement]
+    │       └── 生成 layout_summary.json
+    │
+    └── DeepSeekTranslator.translate_markdown(md_content, target_lang)  [若 translate 阶段需执行]
+            └── 按空行分块 → 并发翻译 → 合并为完整 Markdown
+            └── 保存 {stem}_zh.md（与原文并排）
     │
     ▼
-保存结果：
-    - output_dir/translated_content.json
-    - output_dir/layout_summary.json
+保存 / 更新 batch_summary.json（成功 / 跳过 / 失败统计）
 ```
 
 ## 4. 关键设计决策
@@ -64,4 +74,5 @@ DeepSeekTranslator.translate_batch(texts, target_lang)
 
 ## 5. 变更记录
 
+- **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`，支持增量批量转换；`main.py` 支持 `settings.local.yaml` 覆盖；`translator.py` 新增 Markdown 全文翻译能力。
 - **2026-05-13**: 初始化工程结构，完成 core / utils / config / tests / docs / main.py 全部模块。

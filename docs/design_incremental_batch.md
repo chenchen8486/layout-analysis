@@ -161,7 +161,9 @@ pipeline:
 - **推荐**：在项目根目录创建 `.env` 文件，写入 `DEEPSEEK_API_KEY=sk-...`，`.env` 已加入 `.gitignore`，不会提交。
 - **备选**：设置系统环境变量 `DEEPSEEK_API_KEY`。
 
-读取优先级：`settings.yaml` 配置 > `.env` 文件 > 系统环境变量。
+读取优先级：`settings.yaml` 配置 > `.env` 文件 / 系统环境变量。
+
+> 说明：`.env` 文件通过 `python-dotenv` 加载后，会与系统环境变量合并为同一优先级。因此若 `settings.yaml` 中 `api_key` 为空，则优先使用 `.env` 或环境变量；若 `settings.yaml` 中填写了密钥，则优先使用配置文件中的值。
 
 ## 7. 翻译提效参数
 

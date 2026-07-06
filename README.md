@@ -51,6 +51,68 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 
 ---
 
+## MinerU 源码位置与本工程更新策略
+
+### 原始 MinerU 代码工程位置
+
+本流水线参考并调用了本地 MinerU 源码工程中的能力，原始代码仓库位于：
+
+```text
+D:\project\ai_tools\MinerU-master
+```
+
+> 注意：本工程**不是** MinerU 的 fork，而是调用 `mineru` CLI 的上层封装。因此日常开发不需要修改 MinerU 源码，只需确保本地 MinerU 可执行文件可用即可。
+
+### 当 MinerU 仓库更新时，如何同步到本工程
+
+MinerU 升级后，真正影响本工程的只有三个**耦合面**：
+
+| 耦合面 | 本工程受影响位置 | 检查方法 |
+|---|---|---|
+| CLI 参数协议 | `core/mineru_engine.py` 的 `cmd` 列表 | `mineru --help`、官方 Release Notes |
+| 输出目录结构 | `MinerUEngine.run()` 的目录推断 | 用样例 PDF 跑一次，检查是否仍为 `<stem>/auto/` |
+| `content_list.json` / `.md` schema | `core/layout_parser.py`、`main.py` | 对比新旧输出 JSON 字段 |
+
+推荐更新流程：
+
+1. **锁定当前版本**  
+   在 `requirements.txt` 中固定 MinerU 版本，例如：  
+   ```text
+   mineru==0.10.x
+   ```  
+   并在本工程 README 中记录「已验证兼容版本」。
+
+2. **隔离环境验证新版**  
+   在独立 conda 环境安装新版 MinerU：  
+   ```bash
+   conda create -n mineru-test python=3.10 -y
+   conda activate mineru-test
+   pip install "mineru==x.y.z" -i https://pypi.tuna.tsinghua.edu.cn/simple/
+   ```  
+   用样例 PDF 跑解析，观察输出目录与 JSON 字段变化。
+
+3. **按需修改本工程**  
+   - CLI 参数变了 → 修改 `core/mineru_engine.py`
+   - 输出目录变了 → 修改 `MinerUEngine._resolve_auto_dir()`
+   - JSON / Markdown schema 变了 → 修改 `core/layout_parser.py` / `main.py`
+
+4. **更新测试快照**  
+   将新版 MinerU 的样例输出复制到 `tests/fixtures/sample_mineru_output/`，并运行回归测试：  
+   ```bash
+   python -m unittest discover -s tests -v
+   ```
+
+5. **更新兼容性记录**  
+   在 README 的「已验证兼容的 MinerU 版本」表中追加新版本与验证日期。
+
+### 已验证兼容的 MinerU 版本
+
+| 本工程版本 | MinerU 版本 | 验证日期 | 备注 |
+|-----------|------------|---------|------|
+| 0.1.0     | 待填写     | 待填写  | 首次验证后补充 |
+
+---
+
 ## Linux / macOS 适配说明
 
 本项目代码基于 `pathlib` 与标准库实现，**完全支持 Linux 与 macOS**。Windows 用户可直接按后续章节操作；Linux / macOS 用户请额外注意以下三点差异即可：
@@ -179,9 +241,8 @@ mineru:
 # ── DeepSeek 翻译配置 ──
 deepseek:
   # 【不推荐】直接把 API Key 写在这里。优先使用 .env 文件。
-  # 如果此处留空，程序自动读取：
-  #   1. .env 文件的 DEEPSEEK_API_KEY
-  #   2. 系统环境变量 DEEPSEEK_API_KEY
+  # 读取优先级：settings.yaml > .env 文件 / 系统环境变量
+  # 如果此处留空，程序自动读取 .env 文件或系统环境变量的 DEEPSEEK_API_KEY
   api_key: ""
 
   # 翻译目标语言，支持：中文、英文、日文、韩文、法文、德文
@@ -210,6 +271,8 @@ logging:
   # DEBUG 会输出最详细的信息，适合排错
   level: "INFO"
 ```
+
+> **本地覆盖配置**：如需保留个人路径或密钥且不提交到 Git，可在 `config/` 下创建 `settings.local.yaml`。程序会自动加载它，并覆盖 `settings.yaml` 中的同名配置。该文件已加入 `.gitignore`。
 
 ### 不修改代码的情况下调整翻译参数
 
@@ -305,7 +368,8 @@ outputs/
 layout_analysis/
 ├── config/
 │   ├── __init__.py
-│   └── settings.yaml          # 全局配置（精简版，仅常用参数）
+│   ├── settings.yaml          # 全局配置模板（提交到 Git）
+│   └── settings.local.yaml    # 本地覆盖配置（已加入 .gitignore）
 ├── core/
 │   ├── __init__.py
 │   ├── mineru_engine.py       # MinerU CLI 封装
@@ -471,6 +535,7 @@ python -m unittest tests.test_pipeline_tracker -v
 
 ## 变更记录
 
+- **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`；`main.py` 支持 `settings.local.yaml` 本地覆盖；翻译逻辑从 `main.py` 下沉至 `core/translator.py`。
 - **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。
 - **2026-05-13**: 初始化工程结构，完成全部模块开发。
 - **2026-05-13**: 支持 YAML 配置中 `r"..."` 原始字符串与 Windows 反斜杠路径。

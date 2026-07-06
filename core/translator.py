@@ -297,6 +297,132 @@ class DeepSeekTranslator:
                 for i, t in enumerate(batch)
             ]
 
+    @staticmethod
+    def _chunk_paragraphs(paragraphs: List[str], max_chars: int = 3000) -> List[str]:
+        """将段落列表按字符数分块，不拆分单个段落。
+
+        Args:
+            paragraphs: Markdown 按空行拆分后的段落列表。
+            max_chars: 每块最大字符数（默认 3000，约 1500 tokens）。
+
+        Returns:
+            分块后的字符串列表，每块包含一个或多个完整段落。
+        """
+        chunks: List[str] = []
+        current_chunk: List[str] = []
+        current_len = 0
+
+        for para in paragraphs:
+            para_len = len(para)
+            if current_len + para_len > max_chars and current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = [para]
+                current_len = para_len
+            else:
+                current_chunk.append(para)
+                current_len += para_len
+
+        if current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+
+        return chunks
+
+    def _translate_chunks(
+        self,
+        chunks: List[str],
+        target_lang: str,
+        system_prompt: str,
+    ) -> List[str]:
+        """并发翻译多个 Markdown 分块，保持结果顺序。
+
+        Args:
+            chunks: 待翻译的 Markdown 分块列表。
+            target_lang: 目标语言。
+            system_prompt: 自定义系统提示。
+
+        Returns:
+            与 chunks 顺序对应的译文列表；失败或异常时保留原文。
+        """
+        if not chunks:
+            return []
+
+        total = len(chunks)
+        logger.info(f"分块并发翻译，共 {total} 块，并发 {self.max_workers}")
+
+        results: List[Optional[str]] = [None] * total
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    self.translate_text,
+                    chunk,
+                    target_lang,
+                    system_prompt,
+                ): idx
+                for idx, chunk in enumerate(chunks)
+            }
+
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result = future.result()
+                    if result.success:
+                        results[idx] = result.translated
+                        logger.info(f"块 {idx + 1}/{total} 翻译完成")
+                    else:
+                        logger.error(f"块 {idx + 1}/{total} 翻译失败: {result.error}")
+                        results[idx] = chunks[idx]
+                except Exception as exc:
+                    logger.error(f"块 {idx + 1}/{total} 翻译异常: {exc}", exc_info=True)
+                    results[idx] = chunks[idx]
+
+        for i in range(total):
+            if results[i] is None:
+                results[i] = chunks[i]
+
+        return [r for r in results if r is not None]
+
+    def translate_markdown(
+        self,
+        content: str,
+        target_lang: str = "英文",
+        system_prompt: Optional[str] = None,
+        max_chars: int = 3000,
+    ) -> str:
+        """翻译 Markdown 全文，按段落分块并发翻译，失败时保留原文。
+
+        Args:
+            content: Markdown 原文。
+            target_lang: 目标语言描述，如 "英文", "中文"。
+            system_prompt: 自定义系统提示；None 使用默认 Markdown 翻译提示。
+            max_chars: 每块最大字符数，默认 3000。
+
+        Returns:
+            翻译后的 Markdown 字符串。
+        """
+        if not content or not content.strip():
+            return content
+
+        if system_prompt is None:
+            system_prompt = (
+                f"You are a professional translator. "
+                f"Translate the following Markdown text into {target_lang}. "
+                f"CRITICAL REQUIREMENTS:\n"
+                f"1. Preserve ALL Markdown syntax exactly (headings, lists, tables, code blocks, etc.)\n"
+                f"2. Do NOT modify any image references like ![alt](path) or image paths\n"
+                f"3. Do NOT modify any URL links like [text](url)\n"
+                f"4. Do NOT modify any HTML tags\n"
+                f"5. Only translate natural language text content\n"
+                f"6. Return the complete translated text, keeping the same structure"
+            )
+
+        paragraphs = content.split("\n\n")
+        chunks = self._chunk_paragraphs(paragraphs, max_chars=max_chars)
+        logger.info(f"Markdown 共分 {len(chunks)} 块进行翻译")
+
+        translated_chunks = self._translate_chunks(chunks, target_lang, system_prompt)
+        return "\n\n".join(translated_chunks)
+
     def save_results(
         self,
         results: List[TranslationResult],

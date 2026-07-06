@@ -1,4 +1,4 @@
-"""MinerU 版面分析与翻译流水线入口。
+﻿"""MinerU 版面分析与翻译流水线入口。
 
 使用示例:
     # 仅解析单个 PDF
@@ -19,7 +19,6 @@ import json
 import os
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,18 +46,21 @@ def _preprocess_yaml_raw(text: str) -> str:
     return text
 
 
+def _merge_config(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+    """递归合并配置，override 覆盖 base。"""
+    for key, value in override.items():
+        if (
+            key in base
+            and isinstance(base[key], dict)
+            and isinstance(value, dict)
+        ):
+            _merge_config(base[key], value)
+        else:
+            base[key] = value
+
+
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """加载 YAML 配置文件。
-
-    Args:
-        config_path: 配置文件路径；None 则使用默认路径。
-
-    Returns:
-        配置字典。
-
-    Raises:
-        RuntimeError: YAML 格式非法或包含不可打印转义字符时抛出，并给出修复提示。
-    """
+    """加载 YAML 配置文件，支持 settings.local.yaml 覆盖。"""
     if config_path is None:
         config_path = Path(__file__).resolve().parent / "config" / "settings.yaml"
     else:
@@ -68,7 +70,21 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         logger.warning(f"配置文件不存在: {config_path}，使用默认配置")
         return {}
 
-    with open(config_path, "r", encoding="utf-8-sig") as f:
+    config = _load_yaml(config_path)
+
+    # 加载本地覆盖配置（被 .gitignore 忽略，适合放个人路径 / 密钥）
+    local_path = config_path.with_name("settings.local.yaml")
+    if local_path.exists():
+        logger.info(f"加载本地覆盖配置: {local_path}")
+        local_config = _load_yaml(local_path)
+        _merge_config(config, local_config)
+
+    return config
+
+
+def _load_yaml(path: Path) -> Dict[str, Any]:
+    """读取单个 YAML 文件并做后处理。"""
+    with open(path, "r", encoding="utf-8-sig") as f:
         raw_text = f.read()
 
     # 支持 r"..." / r'...' 原始字符串
@@ -81,7 +97,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             f"配置文件解析失败，检测到不可打印字符（通常是 Windows 路径中的反斜杠被当作转义符）。\n"
             f"错误位置: 第 {exc.position + 1} 个字符附近\n"
             f"修复方案（任选其一）：\n"
-            f"1. 路径前加 r 前缀:  input_path: r\"D:\\\\project\\\\...\"\n"
+            f'1. 路径前加 r 前缀:  input_path: r"D:\\\\project\\\\..."\n'
             f"2. 改用单引号:      input_path: 'D:\\\\project\\\\...'\n"
             f"3. 去掉引号:        input_path: D:\\\\project\\\\...\n"
             f"4. 反斜杠改斜杠:    input_path: D:/project/..."
@@ -177,96 +193,6 @@ def _lang_to_suffix(lang: str) -> str:
         "德语": "de",
     }
     return mapping.get(lang, "translated")
-
-
-def _chunk_paragraphs(paragraphs: List[str], max_chars: int = 3000) -> List[str]:
-    """将段落列表按字符数分块，不拆分单个段落。
-
-    Args:
-        paragraphs: Markdown 按空行拆分后的段落列表。
-        max_chars: 每块最大字符数（默认 3000，约 1500 tokens）。
-
-    Returns:
-        分块后的字符串列表，每块包含一个或多个完整段落。
-    """
-    chunks: List[str] = []
-    current_chunk: List[str] = []
-    current_len = 0
-
-    for para in paragraphs:
-        para_len = len(para)
-        if current_len + para_len > max_chars and current_chunk:
-            chunks.append("\n\n".join(current_chunk))
-            current_chunk = [para]
-            current_len = para_len
-        else:
-            current_chunk.append(para)
-            current_len += para_len
-
-    if current_chunk:
-        chunks.append("\n\n".join(current_chunk))
-
-    return chunks
-
-
-def _translate_chunks(
-    chunks: List[str],
-    translator: DeepSeekTranslator,
-    target_lang: str,
-    system_prompt: str,
-    max_workers: int = 3,
-) -> List[str]:
-    """并发翻译多个 Markdown 分块，保持结果顺序。
-
-    Args:
-        chunks: 待翻译的 Markdown 分块列表。
-        translator: 已初始化的翻译器。
-        target_lang: 目标语言。
-        system_prompt: 自定义系统提示。
-        max_workers: 最大并发数。
-
-    Returns:
-        与 chunks 顺序对应的译文列表。
-    """
-    if not chunks:
-        return []
-
-    total = len(chunks)
-    logger.info(f"分块并发翻译，共 {total} 块，并发 {max_workers}")
-
-    results: List[Optional[str]] = [None] * total
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_idx = {
-            executor.submit(
-                translator.translate_text,
-                chunk,
-                target_lang,
-                system_prompt,
-            ): idx
-            for idx, chunk in enumerate(chunks)
-        }
-
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                result = future.result()
-                if result.success:
-                    results[idx] = result.translated
-                    logger.info(f"块 {idx + 1}/{total} 翻译完成")
-                else:
-                    logger.error(f"块 {idx + 1}/{total} 翻译失败: {result.error}")
-                    results[idx] = chunks[idx]  # 失败时保留原文
-            except Exception as exc:
-                logger.error(f"块 {idx + 1}/{total} 翻译异常: {exc}", exc_info=True)
-                results[idx] = chunks[idx]  # 异常时保留原文
-
-    # 兜底：任何未填充的位置保留原文
-    for i in range(total):
-        if results[i] is None:
-            results[i] = chunks[i]
-
-    return [r for r in results if r is not None]
 
 
 def get_pdf_meta_dir(pdf_path: Path, output_path: Path) -> Path:
@@ -382,31 +308,11 @@ def process_single_pdf(
                     else:
                         logger.info(f"[{pdf_path.name}] Markdown 分块翻译，原文长度: {len(md_content)} 字符")
 
-                        # 按空行分割段落，分块并发翻译
-                        paragraphs = md_content.split("\n\n")
-                        chunks = _chunk_paragraphs(paragraphs, max_chars=3000)
-                        logger.info(f"[{pdf_path.name}] 共分 {len(chunks)} 块进行翻译")
-
-                        system_prompt = (
-                            f"You are a professional translator. "
-                            f"Translate the following Markdown text into {target_lang}. "
-                            f"CRITICAL REQUIREMENTS:\n"
-                            f"1. Preserve ALL Markdown syntax exactly (headings, lists, tables, code blocks, etc.)\n"
-                            f"2. Do NOT modify any image references like ![alt](path) or image paths\n"
-                            f"3. Do NOT modify any URL links like [text](url)\n"
-                            f"4. Do NOT modify any HTML tags\n"
-                            f"5. Only translate natural language text content\n"
-                            f"6. Return the complete translated text, keeping the same structure"
+                        translated_content = translator.translate_markdown(
+                            md_content,
+                            target_lang=target_lang,
+                            max_chars=3000,
                         )
-
-                        translated_chunks = _translate_chunks(
-                            chunks,
-                            translator,
-                            target_lang,
-                            system_prompt,
-                            max_workers=translator.max_workers,
-                        )
-                        translated_content = "\n\n".join(translated_chunks)
 
                         # 保存到 auto 目录，和原文并排
                         if save_markdown:

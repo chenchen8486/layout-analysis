@@ -83,6 +83,14 @@ class TestPipelineTracker(unittest.TestCase):
             tracker.mark_stage(self.pdf_path, stage, StageStatus.DONE)
         self.assertTrue(tracker.all_done())
 
+    def test_all_done_with_skipped(self):
+        """阶段 skipped 也应视为完成，all_done 返回 True。"""
+        tracker = PipelineTracker(self.output_dir)
+        tracker.mark_stage(self.pdf_path, "mineru", StageStatus.DONE)
+        tracker.mark_stage(self.pdf_path, "layout", StageStatus.DONE)
+        tracker.mark_stage(self.pdf_path, "translate", StageStatus.SKIPPED)
+        self.assertTrue(tracker.all_done())
+
     def test_all_done_partial(self):
         """部分阶段未完成时返回 False。"""
         tracker = PipelineTracker(self.output_dir)

@@ -1,22 +1,26 @@
 # 常用配置：按需修改即可；其余参数使用代码内置默认值
 # 完整参数说明见 README.md
+#
+# 安全提示：
+#   - 不要把 DeepSeek API Key 直接写在这里并提交到 Git。
+#   - 优先使用项目根目录的 .env 文件：DEEPSEEK_API_KEY=sk-...
+#   - 如需本地覆盖，请使用 config/settings.local.yaml（已被 .gitignore 忽略）。
 
 mineru:
   # 若 mineru.exe 不在 conda doc 环境或系统 PATH，请填写绝对路径
   executable_path: ""
 
 deepseek:
-  # 推荐将 API Key 写入 .env 文件（DEEPSEEK_API_KEY=...），避免泄露
-  # 若此处留空，程序会自动读取 .env 或环境变量
+  # 不要把真实密钥写在这里。优先使用 .env 文件或环境变量 DEEPSEEK_API_KEY
   api_key: ""
   # 翻译目标语言：中文、英文、日文 等
   target_lang: "中文"
 
 pipeline:
   # 输入路径：单个 PDF 文件，或包含多个 PDF 的文件夹
-  input_path: "D:/project/python_release/avation_doc/input"
+  input_path: ""
   # 输出路径：解析与翻译结果存放目录
-  output_path: "D:/project/python_release/avation_doc/output"
+  output_path: ""
   # 是否启用 DeepSeek 翻译（false = 仅解析，不翻译）
   translate: true
   # 是否保存翻译后的 Markdown 文件

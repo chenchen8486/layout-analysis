@@ -6,13 +6,19 @@ from pathlib import Path
 from datetime import datetime
 
 
-def setup_logger(name: str, level: str = "INFO", output_dir: str = "logs") -> logging.Logger:
+def setup_logger(
+    name: str,
+    level: str = "INFO",
+    output_dir: str = "logs",
+    reset: bool = False,
+) -> logging.Logger:
     """配置并返回一个支持文件与控制台的 Logger。
 
     Args:
         name: Logger 名称。
         level: 日志级别，如 "DEBUG", "INFO", "WARNING", "ERROR"。
         output_dir: 日志文件输出目录。
+        reset: 是否清空已有 Handler 并重新初始化。
 
     Returns:
         配置完成的 Logger 实例。
@@ -26,9 +32,12 @@ def setup_logger(name: str, level: str = "INFO", output_dir: str = "logs") -> lo
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # 避免重复添加 Handler
-    if logger.handlers:
+    # 避免重复添加 Handler；若 reset=True 则重新初始化
+    if logger.handlers and not reset:
         return logger
+
+    if reset:
+        logger.handlers.clear()
 
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s - %(message)s",

@@ -462,7 +462,12 @@ def main() -> int:
 
     # 重新初始化日志级别（若配置文件中指定）
     if log_cfg.get("level"):
-        logger = setup_logger("main", level=log_cfg["level"], output_dir=log_cfg.get("output_dir", "logs"))
+        logger = setup_logger(
+            "main",
+            level=log_cfg["level"],
+            output_dir=log_cfg.get("output_dir", "logs"),
+            reset=True,
+        )
 
     # 环境变量兼容：自动设置 HF 国内镜像（与原始脚本保持一致）
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")

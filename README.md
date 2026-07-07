@@ -397,8 +397,7 @@ layout_analysis/
 │   ├── test_pipeline_tracker.py
 │   └── test_translator.py
 ├── docs/
-│   ├── design.md              # 初始设计文档
-│   └── design_incremental_batch.md  # 增量批量转换设计
+│   └── architecture.md        # 架构文档：模块职责、调用流程、关键设计决策
 ├── .env                       # DeepSeek API Key（已加入 .gitignore）
 ├── main.py                    # 命令行入口
 ├── requirements.txt
@@ -556,9 +555,15 @@ python -m unittest tests.test_pipeline_tracker -v
 
 ---
 
+## 未来规划
+
+- **UI 界面开发（暂缓）**：Gradio 等交互式界面属于增强功能，当前核心流水线、测试覆盖与文档同步已优先完成；待后续有明确需求时再议。若重启 UI 议题，需遵循 `core/` 零 UI 依赖、通过 Protocol/回调解耦的原则。
+
+---
+
 ## 变更记录
 
-- **2026-07-07**: 为 `MinerUEngine.run()` 增加流水线级重试机制，默认最多尝试 3 次；支持通过 `config/settings.yaml` 的 `mineru.max_retries` 调整。
+- **2026-07-07**: 合并 `docs/design.md` 与 `docs/design_incremental_batch.md` 为 `docs/architecture.md`；删除 `docs/optimization_plan.md`；P3 UI 议题移入「未来规划」。
 - **2026-07-06**: 锁定 MinerU 兼容版本为 3.4.2，更新 README 安装指引与 `requirements.txt`。
 - **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`；`main.py` 支持 `settings.local.yaml` 本地覆盖；翻译逻辑从 `main.py` 下沉至 `core/translator.py`。
 - **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。

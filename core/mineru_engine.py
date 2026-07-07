@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,7 @@ class MinerUEngine:
         executable_path: Optional[str] = None,
         backend: str = "pipeline",
         language: str = "ch",
+        max_retries: int = 3,
     ) -> None:
         """初始化引擎。
 
@@ -26,9 +28,11 @@ class MinerUEngine:
             executable_path: MinerU 可执行文件路径；None 则自动查找。
             backend: 解析后端，默认 pipeline。
             language: 文档语言，默认中文 ch。
+            max_retries: MinerU 解析最大尝试次数（默认 3 次）。
         """
         self.backend = backend
         self.language = language
+        self.max_retries = max(1, max_retries)
         self.executable = self._resolve_executable(executable_path)
 
     def _resolve_executable(self, explicit: Optional[str]) -> str:
@@ -118,7 +122,7 @@ class MinerUEngine:
         return stem_dir
 
     def run(self, pdf_path: Path, output_dir: Path) -> Path:
-        """执行 MinerU 解析任务。
+        """执行 MinerU 解析任务，失败时按配置重试。
 
         Args:
             pdf_path: 待解析的 PDF 文件路径。
@@ -128,7 +132,7 @@ class MinerUEngine:
             MinerU 实际写入的子目录路径（通常为 output_dir/<pdf_stem>/auto/）。
 
         Raises:
-            RuntimeError: MinerU 进程返回非零退出码。
+            RuntimeError: 超过最大重试次数仍失败。
             FileNotFoundError: PDF 文件不存在。
         """
         pdf_path = Path(pdf_path)
@@ -150,28 +154,36 @@ class MinerUEngine:
         logger.info(f"启动 MinerU: {' '.join(cmd)}")
         logger.info(f"工作目录: {output_dir}")
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                env=os.environ,
-                cwd=str(output_dir),
-            )
-        except FileNotFoundError as exc:
-            logger.error(f"无法执行 {self.executable}，请确认 MinerU 已正确安装")
-            raise RuntimeError("MinerU 可执行文件无法启动") from exc
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            logger.info(f"MinerU 第 {attempt}/{self.max_retries} 次尝试")
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    env=os.environ,
+                    cwd=str(output_dir),
+                )
+            except FileNotFoundError as exc:
+                logger.error(f"无法执行 {self.executable}，请确认 MinerU 已正确安装")
+                raise RuntimeError("MinerU 可执行文件无法启动") from exc
 
-        logger.info(f"MinerU 返回码: {result.returncode}")
-        if result.stdout:
-            logger.info(f"STDOUT:\n{result.stdout}")
-        if result.stderr:
-            logger.warning(f"STDERR:\n{result.stderr}")
+            logger.info(f"MinerU 返回码: {result.returncode}")
+            if result.stdout:
+                logger.info(f"STDOUT:\n{result.stdout}")
+            if result.stderr:
+                logger.warning(f"STDERR:\n{result.stderr}")
 
-        if result.returncode != 0:
-            raise RuntimeError(
+            if result.returncode == 0:
+                return self.resolve_auto_dir(pdf_path, output_dir)
+
+            last_error = RuntimeError(
                 f"MinerU 进程异常退出（返回码 {result.returncode}），详见日志"
             )
+            if attempt < self.max_retries:
+                logger.warning(f"MinerU 解析失败，1 秒后进行第 {attempt + 1}/{self.max_retries} 次重试...")
+                time.sleep(1)
 
-        return self.resolve_auto_dir(pdf_path, output_dir)
+        raise last_error or RuntimeError("MinerU 解析失败")

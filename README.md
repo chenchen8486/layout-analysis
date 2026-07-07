@@ -45,6 +45,7 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 ```
 
 依赖清单：
+
 - `requests` — HTTP 请求库
 - `pyyaml` — YAML 配置解析
 - `python-dotenv` — 从 `.env` 文件加载环境变量
@@ -67,37 +68,43 @@ D:\project\ai_tools\MinerU-master
 
 MinerU 升级后，真正影响本工程的只有三个**耦合面**：
 
-| 耦合面 | 本工程受影响位置 | 检查方法 |
-|---|---|---|
-| CLI 参数协议 | `core/mineru_engine.py` 的 `cmd` 列表 | `mineru --help`、官方 Release Notes |
-| 输出目录结构 | `MinerUEngine.run()` 的目录推断 | 用样例 PDF 跑一次，检查是否仍为 `<stem>/auto/` |
-| `content_list.json` / `.md` schema | `core/layout_parser.py`、`main.py` | 对比新旧输出 JSON 字段 |
+| 耦合面                                | 本工程受影响位置                           | 检查方法                              |
+| ---------------------------------- | ---------------------------------- | --------------------------------- |
+| CLI 参数协议                           | `core/mineru_engine.py` 的 `cmd` 列表 | `mineru --help`、官方 Release Notes  |
+| 输出目录结构                             | `MinerUEngine.run()` 的目录推断         | 用样例 PDF 跑一次，检查是否仍为 `<stem>/auto/` |
+| `content_list.json` / `.md` schema | `core/layout_parser.py`、`main.py`  | 对比新旧输出 JSON 字段                    |
 
 推荐更新流程：
 
 1. **锁定当前版本**  
    在 `requirements.txt` 中固定 MinerU 版本，例如：  
+   
    ```text
    mineru==0.10.x
-   ```  
+   ```
+   
    并在本工程 README 中记录「已验证兼容版本」。
 
 2. **隔离环境验证新版**  
    在独立 conda 环境安装新版 MinerU：  
+   
    ```bash
    conda create -n mineru-test python=3.10 -y
    conda activate mineru-test
    pip install "mineru==x.y.z" -i https://pypi.tuna.tsinghua.edu.cn/simple/
-   ```  
+   ```
+   
    用样例 PDF 跑解析，观察输出目录与 JSON 字段变化。
 
 3. **按需修改本工程**  
+   
    - CLI 参数变了 → 修改 `core/mineru_engine.py`
    - 输出目录变了 → 修改 `MinerUEngine._resolve_auto_dir()`
    - JSON / Markdown schema 变了 → 修改 `core/layout_parser.py` / `main.py`
 
 4. **更新测试快照**  
    将新版 MinerU 的样例输出复制到 `tests/fixtures/sample_mineru_output/`，并运行回归测试：  
+   
    ```bash
    python -m unittest discover -s tests -v
    ```
@@ -107,83 +114,9 @@ MinerU 升级后，真正影响本工程的只有三个**耦合面**：
 
 ### 已验证兼容的 MinerU 版本
 
-| 本工程版本 | MinerU 版本 | 验证日期 | 备注 |
-|-----------|------------|---------|------|
-| 0.1.0     | 3.4.2      | 2026-07-06 | 基于 `D:\project\ai_tools\MinerU-master` 源码版本验证 |
-
----
-
-## 本工程与本地深度学习模型的关系
-
-### 本工程不直接加载本地模型
-
-`layout_analysis` 本身**不直接调用**任何本地深度学习模型。它通过 `core/mineru_engine.py` 调用 MinerU CLI，由 MinerU 内部完成版面分析、OCR、公式识别、表格识别等任务。本工程只负责解析 MinerU 输出的 JSON 与 Markdown。
-
-因此：
-
-- 本工程目录下**没有** `.pth` / `.safetensors` / `.onnx` 等模型文件。
-- 所有模型文件都在 MinerU 的模型缓存目录中。
-- `core/translator.py` 中的 DeepSeek 仅用于 Markdown 翻译，**不用于 OCR 或版面分析**。
-
-### MinerU 内部使用的模型
-
-MinerU 3.4.2 默认从 Hugging Face 仓库 `opendatalab/PDF-Extract-Kit-1.0` 下载模型。已验证的模型清单如下：
-
-| 任务 | 模型 / 目录 | 说明 |
-|------|------------|------|
-| 版面分析 | `models/Layout/PP-DocLayoutV2` | PP-DocLayoutV2 版面分析模型 |
-| OCR | `models/OCR/paddleocr_torch` | PaddleOCR PyTorch 版本 |
-| 公式识别 | `models/MFR/unimernet_hf_small_2503` | UniMERNet 公式识别模型 |
-| 文档方向分类 | `models/OriCls/paddle_orientation_classification` | Paddle 方向分类模型 |
-| 表格分类 | `models/TabCls/paddle_table_cls` | 表格/非表格分类模型 |
-| 表格结构识别 | `models/TabRec/SlanetPlus` | SLANet+ 表格结构识别 |
-| 表格单元格识别 | `models/TabRec/UnetStructure` | UNet 表格单元格定位 |
-
-### 模型文件在本机的默认位置
-
-MinerU 使用 `huggingface_hub.snapshot_download` 下载模型，默认缓存到 Hugging Face 缓存目录。以当前环境为例，完整路径为：
-
-```text
-C:\Users\chenc\.cache\huggingface\hub\
-└── models--opendatalab--PDF-Extract-Kit-1.0/
-    └── snapshots/
-        └── d1336ee3c2975a8b26c4b09ff39dc6b593d34141/
-            └── models/
-                ├── Layout/PP-DocLayoutV2/
-                │   ├── config.json
-                │   ├── model.safetensors
-                │   └── preprocessor_config.json
-                ├── OCR/paddleocr_torch/
-                │   ├── ch_PP-OCRv4_rec_server_doc_infer.pth
-                │   ├── ch_PP-OCRv5_det_infer.pth
-                │   └── ch_PP-OCRv5_rec_infer.pth
-                ├── MFR/unimernet_hf_small_2503/
-                │   ├── config.json
-                │   ├── model.safetensors
-                │   ├── tokenizer.json
-                │   └── tokenizer_config.json
-                ├── OriCls/paddle_orientation_classification/
-                ├── TabCls/paddle_table_cls/
-                └── TabRec/
-                    ├── SlanetPlus/
-                    └── UnetStructure/
-```
-
-> 注意：`snapshots/` 下的哈希文件夹名称会随 MinerU 版本或模型更新而变化。如果你配置了 `HF_HOME` 环境变量，缓存目录会移到 `HF_HOME/hub/` 下。
-
-### 如何自定义模型缓存位置
-
-如需把模型放到其他磁盘（如空间更大的 D 盘），可在运行 MinerU 前设置环境变量：
-
-```bash
-# Windows (PowerShell)
-$env:HF_HOME = "D:/huggingface_cache"
-
-# Linux / macOS
-export HF_HOME="/path/to/huggingface_cache"
-```
-
-设置后，MinerU 会自动将新模型下载到指定目录。
+| 本工程版本 | MinerU 版本 | 验证日期       | 备注                                            |
+| ----- | --------- | ---------- | --------------------------------------------- |
+| 0.1.0 | 3.4.2     | 2026-07-06 | 基于 `D:\project\ai_tools\MinerU-master` 源码版本验证 |
 
 ---
 
@@ -254,6 +187,7 @@ DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 > **如何获取 API Key？**
+> 
 > 1. 访问 [DeepSeek 开放平台](https://platform.deepseek.com/)
 > 2. 注册 / 登录账号
 > 3. 进入「API Keys」页面，点击「创建 API Key」
@@ -278,11 +212,11 @@ pipeline:
 
 **路径配置示例**：
 
-| 场景 | `input_path` 写法 | `output_path` 写法 |
-|---|---|---|
-| 单文件 | `D:/data/report.pdf` | `D:/outputs/report` |
-| 文件夹（批量） | `D:/data/pdfs` | `D:/outputs` |
-| 相对路径（项目内） | `./my_pdfs` | `./my_outputs` |
+| 场景        | `input_path` 写法      | `output_path` 写法    |
+| --------- | -------------------- | ------------------- |
+| 单文件       | `D:/data/report.pdf` | `D:/outputs/report` |
+| 文件夹（批量）   | `D:/data/pdfs`       | `D:/outputs`        |
+| 相对路径（项目内） | `./my_pdfs`          | `./my_outputs`      |
 
 > **Windows 路径建议**：使用正斜杠 `/`（如 `D:/data/input`），或加 `r` 前缀（如 `r"D:\data\input"`）。直接使用反斜杠 `\` 会导致 YAML 解析失败。
 
@@ -311,6 +245,10 @@ mineru:
   #   2. 环境变量 MINERU_PATH
   #   3. 系统 PATH
   executable_path: ""
+
+  # 【可选】MinerU 解析失败时的最大尝试次数
+  # 默认 3 次；设为 1 则禁用重试
+  max_retries: 3
 
 # ── DeepSeek 翻译配置 ──
 deepseek:
@@ -352,15 +290,15 @@ logging:
 
 在 `config/settings.yaml` 的 `deepseek` 段下添加以下任一项即可覆盖代码默认值：
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `model` | `deepseek-chat` | 使用的模型名称 |
-| `base_url` | `https://api.deepseek.com` | API 基础地址 |
-| `batch_size` | 32 | 每批翻译段落数 |
-| `temperature` | 0.1 | 生成温度，越低越稳定 |
-| `max_workers` | 3 | 并发线程数 |
-| `max_retries` | 3 | 失败重试次数 |
-| `timeout` | 60 | 单次请求超时（秒） |
+| 参数            | 默认值                        | 说明         |
+| ------------- | -------------------------- | ---------- |
+| `model`       | `deepseek-chat`            | 使用的模型名称    |
+| `base_url`    | `https://api.deepseek.com` | API 基础地址   |
+| `batch_size`  | 32                         | 每批翻译段落数    |
+| `temperature` | 0.1                        | 生成温度，越低越稳定 |
+| `max_workers` | 3                          | 并发线程数      |
+| `max_retries` | 3                          | 失败重试次数     |
+| `timeout`     | 60                         | 单次请求超时（秒）  |
 
 示例：
 
@@ -403,15 +341,15 @@ python main.py -i "D:/docs/test.pdf" -o "D:/outputs/test" --no-translate
 
 常用命令行参数：
 
-| 参数 | 简写 | 说明 |
-|---|---|---|
-| `--input` | `-i` | 输入 PDF 文件或文件夹路径 |
-| `--output` | `-o` | 输出目录路径 |
-| `--config` | `-c` | 指定自定义配置文件路径 |
-| `--translate` | `-t` | 启用翻译 |
-| `--target-lang` | | 翻译目标语言 |
+| 参数                | 简写   | 说明              |
+| ----------------- | ---- | --------------- |
+| `--input`         | `-i` | 输入 PDF 文件或文件夹路径 |
+| `--output`        | `-o` | 输出目录路径          |
+| `--config`        | `-c` | 指定自定义配置文件路径     |
+| `--translate`     | `-t` | 启用翻译            |
+| `--target-lang`   |      | 翻译目标语言          |
 | `--save-markdown` | `-m` | 保存翻译后的 Markdown |
-| `--recursive` | `-r` | 递归扫描子目录 |
+| `--recursive`     | `-r` | 递归扫描子目录         |
 
 ---
 
@@ -507,11 +445,13 @@ main.py
 - `stages`：MinerU 解析 / 版面分析 / 翻译 三个阶段的状态
 
 **判断逻辑**：
+
 1. 若阶段状态非 `done`，必须执行；
 2. 若阶段已完成，但源文件在上次处理后又被修改过（`current_mtime > source_mtime`），则重新执行；
 3. 否则跳过该阶段。
 
 这意味着：
+
 - 第一次运行会完整处理所有 PDF；
 - 再次运行（未修改文件）会秒级跳过；
 - 修改了某个 PDF 后再次运行，仅重新处理该文件；
@@ -545,17 +485,22 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 **原因**：当前环境没有安装 MinerU，或不在 PATH 中。
 
 **解决**：
-1. 确认已激活 conda `doc` 环境：`conda activate doc`
-2. 验证安装：`mineru --help`
-3. 若仍报错，在 `config/settings.yaml` 中显式指定路径：
 
+1. 确认已激活 conda `doc` 环境：`conda activate doc`
+
+2. 验证安装：`mineru --help`
+
+3. 若仍报错，在 `config/settings.yaml` 中显式指定路径：
+   
    **Windows**：
+   
    ```yaml
    mineru:
      executable_path: "C:/Users/xxx/anaconda3/envs/doc/Scripts/mineru.exe"
    ```
-
+   
    **Linux / macOS**：
+   
    ```yaml
    mineru:
      executable_path: "/home/xxx/anaconda3/envs/doc/bin/mineru"
@@ -566,6 +511,7 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 **原因**：`.env` 文件不存在，或文件中的 Key 名称写错。
 
 **解决**：
+
 1. 确认项目根目录存在 `.env` 文件
 2. 确认内容为 `DEEPSEEK_API_KEY=sk-...`（不是 `api_key=` 或其他名称）
 3. 确认没有多余的空格或引号
@@ -575,6 +521,7 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 **原因**：Windows 路径中的反斜杠 `\` 在 YAML 双引号字符串内被当作转义符。
 
 **解决**（任选其一）：
+
 - 路径前加 `r` 前缀：`input_path: r"D:\data\input"`
 - 改用单引号：`input_path: 'D:\data\input'`
 - 反斜杠改斜杠：`input_path: D:/data/input`
@@ -584,12 +531,14 @@ for path in glob.glob('outputs/*/pipeline_state.json'):
 **原因**：早期版本使用全文一次性翻译，当 PDF 内容过长时，API 输出会被截断。
 
 **解决**：
+
 - 请确保使用的是最新代码（已改为分块并发翻译，每块约 3000 字符，默认 3 线程并发）
 - 如仍有问题，尝试减小 `batch_size` 或增大 `timeout`
 
 ### Q5: 如何只解析不翻译？
 
 两种方法：
+
 1. 修改 `config/settings.yaml`：`translate: false`
 2. 命令行覆盖：`python main.py -i ./input -o ./output --no-translate`
 
@@ -609,7 +558,7 @@ python -m unittest tests.test_pipeline_tracker -v
 
 ## 变更记录
 
-- **2026-07-06**: 新增「本工程与本地深度学习模型的关系」章节，说明 MinerU 内部模型清单与本机缓存路径。
+- **2026-07-07**: 为 `MinerUEngine.run()` 增加流水线级重试机制，默认最多尝试 3 次；支持通过 `config/settings.yaml` 的 `mineru.max_retries` 调整。
 - **2026-07-06**: 锁定 MinerU 兼容版本为 3.4.2，更新 README 安装指引与 `requirements.txt`。
 - **2026-07-06**: 补全 `core/pipeline_tracker.py` 与 `core/translator.py`；`main.py` 支持 `settings.local.yaml` 本地覆盖；翻译逻辑从 `main.py` 下沉至 `core/translator.py`。
 - **2026-05-14**: 完善 README，补充 MinerU 安装指引、.env 配置步骤、路径示例、常见问题排查。

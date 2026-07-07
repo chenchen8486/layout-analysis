@@ -451,6 +451,7 @@ def main() -> int:
     backend = args.backend or mineru_cfg.get("backend", "pipeline")
     language = args.language or mineru_cfg.get("language", "ch")
     recursive = args.recursive or pipeline_cfg.get("recursive", False)
+    mineru_max_retries = mineru_cfg.get("max_retries", 3)
 
     # 翻译开关与目标语言同样支持配置文件
     translate = args.translate or pipeline_cfg.get("translate", False)
@@ -492,6 +493,7 @@ def main() -> int:
             executable_path=mineru_exe,
             backend=backend,
             language=language,
+            max_retries=mineru_max_retries,
         )
     except Exception as exc:
         logger.critical(f"MinerU 引擎初始化失败: {exc}", exc_info=True)

@@ -150,34 +150,6 @@ def collect_pdfs(input_path: Path, recursive: bool = False) -> List[Path]:
     raise ValueError(f"输入路径必须是 PDF 文件或目录: {input_path}")
 
 
-def _build_markdown_lines(
-    elements: List[Any],
-    translated_map: Optional[Dict[int, str]] = None,
-) -> List[str]:
-    """根据版面元素列表生成 Markdown 行。
-
-    Args:
-        elements: LayoutElement 列表。
-        translated_map: 索引到译文的映射；None 则使用原文。
-
-    Returns:
-        Markdown 字符串行列表。
-    """
-    md_lines: List[str] = []
-    for idx, elem in enumerate(elements):
-        text = translated_map.get(idx, elem.text) if translated_map else elem.text
-        if not text:
-            text = elem.text
-
-        if elem.element_type.value == "title":
-            md_lines.append(f"# {text}\n")
-        elif elem.element_type.value in ("header", "footer", "page_number"):
-            md_lines.append(f"*{text}*\n")
-        else:
-            md_lines.append(f"{text}\n")
-    return md_lines
-
-
 def _lang_to_suffix(lang: str) -> str:
     """将目标语言描述映射为文件名后缀。"""
     mapping = {
